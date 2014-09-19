@@ -19,13 +19,13 @@ module Mongo
       # Sets up DNS resolution with IPv4 support if the address is an ip
       # address.
       #
-      # @since 3.0.0
+      # @since 2.0.0
       class IPv4
         include Resolvable
 
         # The regular expression to use to match an IPv4 ip address.
         #
-        # @since 3.0.0
+        # @since 2.0.0
         MATCH = Regexp.new('/\./').freeze
 
         # Initialize the IPv4 resolver.
@@ -35,11 +35,12 @@ module Mongo
         #
         # @param [ String ] address The address to resolve.
         #
-        # @since 3.0.0
+        # @since 2.0.0
         def initialize(address)
           parts = address.split(':')
           @host = parts[0]
           @port = (parts[1] || 27017).to_i
+          @seed = address
           resolve!
         end
 
@@ -51,7 +52,7 @@ module Mongo
         #
         # @return [ Regexp ] The regexp.
         #
-        # @since 3.0.0
+        # @since 2.0.0
         def pattern
           Resolv::IPv4::Regex
         end
@@ -62,17 +63,29 @@ module Mongo
         #   ipv4.socket(5, :ssl => true)
         #
         # @param [ Float ] timeout The socket timeout.
-        # @param [ Hash ] ssl_opts SSL options.
+        # @param [ Hash ] ssl_options SSL options.
         #
         # @return [ Pool::Socket::SSL, Pool::Socket::TCP ] The socket.
         #
-        # @since 3.0.0
-        def socket(timeout, ssl_opts = {})
-          unless ssl_opts.empty?
-            Pool::Socket::SSL.new(ip, port, timeout, Socket::PF_INET, ssl_opts)
+        # @since 2.0.0
+        def socket(timeout, ssl_options = {})
+          unless ssl_options.empty?
+            Socket::SSL.new(ip, port, timeout, Socket::PF_INET, ssl_options)
           else
-            Pool::Socket::TCP.new(ip, port, timeout, Socket::PF_INET)
+            Socket::TCP.new(ip, port, timeout, Socket::PF_INET)
           end
+        end
+
+        # Get the address as a string.
+        #
+        # @example Get the address as a string.
+        #   ipv4.to_s
+        #
+        # @return [ String ] The nice string.
+        #
+        # @since 2.0.0
+        def to_s
+          "#{host}:#{port}"
         end
       end
     end

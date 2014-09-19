@@ -18,12 +18,12 @@ module Mongo
     # Defines default behavior for write concerns and provides a factory
     # interface to get a proper object from options.
     #
-    # @since 3.0.0
+    # @since 2.0.0
     class Mode
 
-      # The default write concern is to acknowledge on a single node.
+      # The default write concern is to acknowledge on a single server.
       #
-      # @since 3.0.0
+      # @since 2.0.0
       DEFAULT = { :w => 1 }.freeze
 
       # @return [ Hash ] The write concern options.
@@ -38,7 +38,7 @@ module Mongo
       #
       # @param [ Hash ] options The options to instantiate with.
       #
-      # @option options :w [ Integer, String ] The number of nodes or the
+      # @option options :w [ Integer, String ] The number of servers or the
       #   custom mode to acknowledge.
       # @option options :j [ true, false ] Whether to acknowledge a write to
       #   the journal.
@@ -47,9 +47,9 @@ module Mongo
       # @option options :wtimeout [ Integer ] The number of milliseconds to
       #   wait for acknowledgement before raising an error.
       #
-      # @since 3.0.0
+      # @since 2.0.0
       def initialize(options)
-        @options = options
+        @options = options.freeze
       end
 
       private
@@ -66,11 +66,11 @@ module Mongo
       #
       # @return [ Hash ] The hash with normalized values.
       #
-      # @since 3.0.0
+      # @since 2.0.0
       def normalize(options)
-        options.reduce({}) do |opts, (key, value)|
-          opts[key] = value.is_a?(Symbol) ? value.to_s : value
-          opts
+        options.reduce({}) do |options, (key, value)|
+          options[key] = value.is_a?(Symbol) ? value.to_s : value
+          options
         end
       end
 
@@ -83,7 +83,7 @@ module Mongo
         #
         # @param [ Hash ] options The options to instantiate with.
         #
-        # @option options :w [ Integer, String ] The number of nodes or the
+        # @option options :w [ Integer, String ] The number of servers or the
         #   custom mode to acknowledge.
         # @option options :j [ true, false ] Whether to acknowledge a write to
         #   the journal.
@@ -92,9 +92,9 @@ module Mongo
         # @option options :wtimeout [ Integer ] The number of milliseconds to
         #   wait for acknowledgement before raising an error.
         #
-        # @return [ Mongo::WriteConcern::Mode ] The appropriate node.
+        # @return [ Mongo::WriteConcern::Mode ] The appropriate server.
         #
-        # @since 3.0.0
+        # @since 2.0.0
         def get(options)
           if unacknowledged?(options)
             Unacknowledged.new(options)
@@ -113,7 +113,7 @@ module Mongo
         #
         # @return [ true, false ] If the options are unacknowledged.
         #
-        # @since 3.0.0
+        # @since 2.0.0
         def unacknowledged?(options)
           options && (options[:w] == 0 || options[:w] == -1)
         end

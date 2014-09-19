@@ -9,7 +9,7 @@ describe Mongo::Cluster do
   describe '#==' do
 
     let(:addresses) do
-      ['127.0.0.1:27017', '127.0.0.1:27019']
+      ['127.0.0.1:27018']
     end
 
     let(:cluster) do
@@ -36,10 +36,10 @@ describe Mongo::Cluster do
         end
       end
 
-      context 'when the servers are not equal' do
+      context 'when the servers are not equal', simulator: 'cluster' do
 
         let(:other) do
-          described_class.new(client, ['127.0.0.1:27021'])
+          described_class.new(client, ['127.0.0.1:27020'])
         end
 
         it 'returns false' do
@@ -49,60 +49,49 @@ describe Mongo::Cluster do
     end
   end
 
-  describe '#add' do
+  describe '#add', simulator: 'cluster' do
 
     let(:addresses) do
-      ['127.0.0.1:27017', '127.0.0.1:27019']
+      ['127.0.0.1:27018', '127.0.0.1:27019']
     end
 
     let(:cluster) do
-      described_class.new(client, addresses)
+      described_class.new(client, addresses, set_name: 'testing')
     end
 
-    context 'when a node with the address does not exist' do
+    context 'when a server with the address does not exist' do
 
       let(:address) do
-        '127.0.0.1:27020'
+        '127.0.0.1:27021'
       end
 
       let!(:added) do
         cluster.add(address)
       end
 
-      it 'adds the node to the cluster' do
-        expect(cluster.servers.size).to eq(3)
+      before do
+        simulator.add('127.0.0.1:27021')
+        cluster.scan!
       end
 
-      it 'returns the newly added node' do
-        expect(added.address.host).to eq('127.0.0.1')
-        expect(added.address.port).to eq(27020)
-      end
-    end
-
-    context 'when a node with the address exists' do
-
-      let!(:added) do
-        cluster.add('127.0.0.1:27017')
+      after do
+        simulator.remove('127.0.0.1:27021')
       end
 
-      it 'does not add the node to the cluster' do
-        expect(cluster.servers.size).to eq(2)
-      end
-
-      it 'returns nil' do
-        expect(added).to be_nil
+      it 'adds the server to the cluster' do
+        expect(cluster.servers.size).to eq(4)
       end
     end
   end
 
-  describe '#initialize' do
+  describe '#initialize', simulator: 'cluster' do
 
     let(:addresses) do
-      ['127.0.0.1:27017', '127.0.0.1:27019']
+      ['127.0.0.1:27018', '127.0.0.1:27019']
     end
 
     let(:servers) do
-      addresses.map { |address| Mongo::Node.new(address) }
+      addresses.map { |address| Mongo::server.new(address) }
     end
 
     let(:cluster) do
@@ -116,16 +105,110 @@ describe Mongo::Cluster do
     it 'sets the client' do
       expect(cluster.client).to eq(client)
     end
+
+    context 'when the cluster is a replica set' do
+
+      context 'when servers are discovered' do
+
+        let(:cluster) do
+          described_class.new(client, addresses, set_name: 'testing')
+        end
+
+        before do
+          cluster.scan!
+        end
+
+        it 'automatically adds the members to the cluster' do
+          expect(cluster.servers.size).to eq(3)
+        end
+      end
+    end
   end
 
-  describe '#servers' do
+  describe '#remove', simulator: 'cluster' do
 
     let(:addresses) do
-      ['127.0.0.1:27017', '127.0.0.1:27019']
+      ['127.0.0.1:27018', '127.0.0.1:27019', '127.0.0.1:27020']
     end
 
     let(:cluster) do
-      described_class.new(client, addresses)
+      described_class.new(client, addresses, set_name: 'testing')
+    end
+
+    context 'when the address exists' do
+
+      before do
+        cluster.scan!
+        cluster.remove('127.0.0.1:27020')
+      end
+
+      after do
+        cluster.add('127.0.0.1:27020')
+      end
+
+      it 'removes the server from the cluster' do
+        expect(cluster.servers.size).to eq(2)
+      end
+
+      it 'removes the address from the cluster' do
+        expect(cluster.addresses.size).to eq(2)
+      end
+    end
+
+    context 'when the address does not exist' do
+
+      before do
+        cluster.scan!
+        cluster.remove('127.0.0.1:27021')
+      end
+
+      it 'does not remove anything' do
+        expect(cluster.servers.size).to eq(3)
+      end
+    end
+  end
+
+  describe '#replica_set_name' do
+
+    context 'when the cluster is configured with a name' do
+
+      let(:addresses) do
+        ['127.0.0.1:27018', '127.0.0.1:27019']
+      end
+
+      let(:cluster) do
+        described_class.new(client, addresses, replica_set_name: 'test')
+      end
+
+      it 'returns the name' do
+        expect(cluster.replica_set_name).to eq('test')
+      end
+    end
+
+    context 'when the cluster is configured with no name' do
+
+      let(:addresses) do
+        ['127.0.0.1:27018', '127.0.0.1:27019']
+      end
+
+      let(:cluster) do
+        described_class.new(client, addresses)
+      end
+
+      it 'returns nil' do
+        expect(cluster.replica_set_name).to be_nil
+      end
+    end
+  end
+
+  describe '#servers', simulator: 'cluster' do
+
+    let(:addresses) do
+      ['127.0.0.1:27018', '127.0.0.1:27019']
+    end
+
+    let(:cluster) do
+      described_class.new(client, addresses, set_name: 'testing')
     end
 
     let(:servers_internal) do
@@ -135,25 +218,29 @@ describe Mongo::Cluster do
     context 'when all servers are alive' do
 
       before do
-        expect(servers_internal.first).to receive(:operable?).and_return(true)
-        expect(servers_internal.last).to receive(:operable?).and_return(true)
+        cluster.scan!
       end
 
       it 'returns all servers' do
-        expect(cluster.servers.size).to eq(2)
+        expect(cluster.servers.size).to eq(3)
       end
     end
 
     context 'when some servers are not alive' do
 
       before do
-        expect(servers_internal.first).to receive(:operable?).and_return(true)
-        expect(servers_internal.last).to receive(:operable?).and_return(false)
+        expect(servers_internal.first).to receive(:primary?).and_return(true)
+        expect(servers_internal.last).to receive(:primary?).and_return(false)
+        expect(servers_internal.last).to receive(:secondary?).and_return(false)
       end
 
       it 'returns all alive servers' do
         expect(cluster.servers.size).to eq(1)
       end
     end
+  end
+
+  context 'when monitoring a replica set', simulator: 'cluster' do
+
   end
 end

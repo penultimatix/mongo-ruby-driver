@@ -2,389 +2,294 @@ require 'spec_helper'
 
 describe Mongo::Cursor do
 
-  include_context 'shared client'
-  include_context 'shared cursor'
+  describe '#each' do
 
-  let(:cursor) do
-    described_class.new(scope).tap do
-      allow(connection).to receive(:send_and_receive).and_return(*responses)
+    let(:reply) do
+      Mongo::Operation::Read::Query.new(query_spec).execute(authorized_primary.context)
+    end
+
+    let(:cursor) do
+      described_class.new(view, reply, authorized_primary)
+    end
+
+    context 'when no options are provided to the view' do
+
+      let(:view) do
+        Mongo::Collection::View.new(authorized_collection)
+      end
+
+      let(:query_spec) do
+        { :selector => {}, :options => {}, :db_name => TEST_DB, :coll_name => TEST_COLL }
+      end
+
+      context 'when the initial query retieves all documents' do
+
+        let(:documents) do
+          (1..10).map{ |i| { field: "test#{i}" }}
+        end
+
+        before do
+          authorized_collection.insert_many(documents)
+        end
+
+        after do
+          authorized_collection.find.remove_many
+        end
+
+        it 'returns the correct amount' do
+          expect(cursor.to_a.count).to eq(10)
+        end
+
+        it 'iterates the documents' do
+          cursor.each do |doc|
+            expect(doc).to have_key('field')
+          end
+        end
+      end
+
+      context 'when the initial query does not retrieve all documents' do
+
+        let(:documents) do
+          (1..102).map{ |i| { field: "test#{i}" }}
+        end
+
+        before do
+          authorized_collection.insert_many(documents)
+        end
+
+        after do
+          authorized_collection.find.remove_many
+        end
+
+        it 'returns the correct amount' do
+          expect(cursor.to_a.count).to eq(102)
+        end
+
+        it 'iterates the documents' do
+          cursor.each do |doc|
+            expect(doc).to have_key('field')
+          end
+        end
+      end
+    end
+
+    context 'when options are provided to the view' do
+
+      let(:documents) do
+        (1..10).map{ |i| { field: "test#{i}" }}
+      end
+
+      before do
+        authorized_collection.insert_many(documents)
+      end
+
+      after do
+        authorized_collection.find.remove_many
+      end
+
+      context 'when a limit is provided' do
+
+        context 'when no batch size is provided' do
+
+          context 'when the limit is positive' do
+
+            let(:view) do
+              Mongo::Collection::View.new(authorized_collection, {}, :limit => 2)
+            end
+
+            let(:query_spec) do
+              {
+                :selector => {},
+                :options => { :limit => 2 },
+                :db_name => TEST_DB,
+                :coll_name => TEST_COLL
+              }
+            end
+
+            it 'returns the correct amount' do
+              expect(cursor.to_a.count).to eq(2)
+            end
+
+            it 'iterates the documents' do
+              cursor.each do |doc|
+                expect(doc).to have_key('field')
+              end
+            end
+          end
+
+          context 'when the limit is negative' do
+
+            let(:view) do
+              Mongo::Collection::View.new(authorized_collection, {}, :limit => -2)
+            end
+
+            let(:query_spec) do
+              {
+                :selector => {},
+                :options => { :limit => -2 },
+                :db_name => TEST_DB,
+                :coll_name => TEST_COLL
+              }
+            end
+
+            it 'returns the positive number of documents' do
+              expect(cursor.to_a.count).to eq(2)
+            end
+
+            it 'iterates the documents' do
+              cursor.each do |doc|
+                expect(doc).to have_key('field')
+              end
+            end
+          end
+
+          context 'when the limit is zero' do
+
+            let(:view) do
+              Mongo::Collection::View.new(authorized_collection, {}, :limit => 0)
+            end
+
+            let(:query_spec) do
+              {
+                :selector => {},
+                :options => { :limit => 0 },
+                :db_name => TEST_DB,
+                :coll_name => TEST_COLL
+              }
+            end
+
+            it 'returns all documents' do
+              expect(cursor.to_a.count).to eq(10)
+            end
+
+            it 'iterates the documents' do
+              cursor.each do |doc|
+                expect(doc).to have_key('field')
+              end
+            end
+          end
+        end
+
+        context 'when a batch size is provided' do
+
+          context 'when the batch size is less than the limit' do
+
+            let(:view) do
+              Mongo::Collection::View.new(
+                authorized_collection,
+                {},
+                :limit => 5, :batch_size => 3
+              )
+            end
+
+            let(:query_spec) do
+              {
+                :selector => {},
+                :options => { :limit => 5, :batch_size => 3 },
+                :db_name => TEST_DB,
+                :coll_name => TEST_COLL
+              }
+            end
+
+            it 'returns the limited number of documents' do
+              expect(cursor.to_a.count).to eq(5)
+            end
+
+            it 'iterates the documents' do
+              cursor.each do |doc|
+                expect(doc).to have_key('field')
+              end
+            end
+          end
+
+          context 'when the batch size is more than the limit' do
+
+            let(:view) do
+              Mongo::Collection::View.new(
+                authorized_collection,
+                {},
+                :limit => 5, :batch_size => 7
+              )
+            end
+
+            let(:query_spec) do
+              {
+                :selector => {},
+                :options => { :limit => 5, :batch_size => 7 },
+                :db_name => TEST_DB,
+                :coll_name => TEST_COLL
+              }
+            end
+
+            it 'returns the limited number of documents' do
+              expect(cursor.to_a.count).to eq(5)
+            end
+
+            it 'iterates the documents' do
+              cursor.each do |doc|
+                expect(doc).to have_key('field')
+              end
+            end
+          end
+
+          context 'when the batch size is the same as the limit' do
+
+            let(:view) do
+              Mongo::Collection::View.new(
+                authorized_collection,
+                {},
+                :limit => 5, :batch_size => 5
+              )
+            end
+
+            let(:query_spec) do
+              {
+                :selector => {},
+                :options => { :limit => 5, :batch_size => 5 },
+                :db_name => TEST_DB,
+                :coll_name => TEST_COLL
+              }
+            end
+
+            it 'returns the limited number of documents' do
+              expect(cursor.to_a.count).to eq(5)
+            end
+
+            it 'iterates the documents' do
+              cursor.each do |doc|
+                expect(doc).to have_key('field')
+              end
+            end
+          end
+        end
+      end
     end
   end
 
   describe '#inspect' do
 
+    let(:view) do
+      Mongo::Collection::View.new(authorized_collection)
+    end
+
+    let(:query_spec) do
+      { :selector => {}, :options => {}, :db_name => TEST_DB, :coll_name => TEST_COLL }
+    end
+
+    let(:reply) do
+      Mongo::Operation::Read::Query.new(query_spec)
+    end
+
+    let(:cursor) do
+      described_class.new(view, reply, authorized_primary)
+    end
+
     it 'returns a string' do
       expect(cursor.inspect).to be_a(String)
     end
 
-    it 'returns a string containing the scope inspect string' do
-      expect(cursor.inspect).to match(/.*#{scope.inspect}.*/)
-    end
-  end
-
-  context 'when the query has special fields' do
-    let(:scope_opts) { { :comment => 'test' } }
-
-    it 'creates a special selector with $query' do
-      expect(Mongo::Protocol::Query).to receive(:new) do |a, b, selector, c|
-        expect(selector[:$query]).to eq(scope.selector)
-      end
-      cursor.each(&b)
-    end
-  end
-
-  context 'mongos' do
-
-    it 'creates a special selector with $query' do
-      allow(client).to receive(:mongos?).and_return(true)
-      expect(Mongo::Protocol::Query).to receive(:new) do |a, b, selector, c|
-        expect(selector[:$query]).to eq(scope.selector)
-      end
-      cursor.each(&b)
-    end
-  end
-
-  describe '#each' do
-
-    context 'when a block is provided' do
-      let(:n_docs) { 10 }
-      let(:responses) { results(0, n_docs) }
-
-      it 'yields each doc to the block' do
-        expect do |b|
-          cursor.each(&b)
-        end.to yield_control.exactly(n_docs).times
-      end
-    end
-  end
-
-  describe 'iteration' do
-
-    context 'when the query has a limit' do
-      let(:limit) { 8 }
-      let(:scope_opts) { { :limit => limit } }
-
-      context 'when all docs are retreived in one request' do
-        let(:responses) { results(0, limit) }
-
-        it 'requests that number of docs in first query message' do
-          expect(Mongo::Protocol::Query).to receive(:new) do |a, b, c, opts|
-            expect(opts[:limit]).to eq(limit)
-          end
-          cursor.each(&b)
-        end
-
-        it 'returns exactly that number of documents' do
-          expect do |b|
-            cursor.each(&b)
-          end.to yield_control.exactly(limit).times
-        end
-
-        it 'does not send a kill cursors message' do
-          allow(connection).to receive(:send_and_receive).and_return(results)
-          expect(Mongo::Protocol::KillCursors).not_to receive(:new)
-          cursor.each(&b)
-        end
-      end
-
-      context 'when multiple requests are needed' do
-        let(:delta) { 2 }
-        let(:responses) do
-          [results(nonzero, limit - delta),
-           results(nonzero, delta)]
-        end
-
-        it 'requests that number of docs in first query message' do
-          expect(Mongo::Protocol::Query).to receive(:new) do |a, b, c, opts|
-            expect(opts[:limit]).to eq(limit)
-          end
-          cursor.each(&b)
-        end
-
-        it 'requests the remaining docs in a get more message' do
-          expect(Mongo::Protocol::GetMore).to receive(:new) do |a, b, num, c|
-            expect(num).to eq(delta)
-          end
-          cursor.each(&b)
-        end
-
-        it 'returns exactly that number of documents' do
-          expect do |b|
-            cursor.each(&b)
-          end.to yield_control.exactly(limit).times
-        end
-
-        it 'sends a kill cursors message' do
-          expect(Mongo::Protocol::KillCursors).to receive(:new)
-          cursor.each(&b)
-        end
-      end
-    end
-
-    context 'when the query has no limit' do
-      let(:total_docs) { 20 }
-      let(:delta) { 5 }
-
-      context 'when all docs are retreived in one request' do
-        let(:responses) { results(0, total_docs)  }
-
-        it 'does not limit the first query message' do
-          expect(Mongo::Protocol::Query).to receive(:new) do |a, b, c, opts|
-            expect(opts[:limit]).to eq(nil)
-          end
-          cursor.each(&b)
-        end
-
-        it 'returns all documents matching query' do
-          expect do |b|
-            cursor.each(&b)
-          end.to yield_control.exactly(total_docs).times
-        end
-
-        it 'does not send a kill cursors message' do
-          expect(Mongo::Protocol::KillCursors).not_to receive(:new)
-          cursor.each(&b)
-        end
-      end
-
-      context 'when multiple requests are needed' do
-        let(:responses) do
-          [results(nonzero, total_docs - delta), results(0, delta)]
-        end
-
-        it 'does not limit the first query message' do
-          expect(Mongo::Protocol::Query).to receive(:new) do |a, b, c, opts|
-            expect(opts[:limit]).to eq(nil)
-          end
-          cursor.each(&b)
-        end
-
-        it 'does not limit the get more message' do
-          expect(Mongo::Protocol::GetMore).to receive(:new) do |a, b, num, c|
-            expect(num).to eq(nil)
-          end
-          cursor.each(&b)
-        end
-
-        it 'returns the number of documents matching the query' do
-          expect do |b|
-            cursor.each(&b)
-          end.to yield_control.exactly(total_docs).times
-        end
-
-        it 'does not send a kill cursors message' do
-          expect(Mongo::Protocol::KillCursors).not_to receive(:new)
-          cursor.each(&b)
-        end
-      end
-    end
-
-    context 'when the query has a negative limit' do
-      let(:limit) { -5 }
-      let(:scope_opts) { { :limit => limit } }
-
-      context 'when all results are retreived in one request' do
-        let(:responses) { results(0, limit.abs)  }
-
-        it 'requests that number of docs in the first query message' do
-          expect(Mongo::Protocol::Query).to receive(:new) do |a, b, c, opts|
-            expect(opts[:limit]).to eq(limit)
-          end
-          cursor.each(&b)
-        end
-
-        it 'returns exactly that limit number of documents' do
-          expect do |b|
-            cursor.each(&b)
-          end.to yield_control.exactly(limit.abs).times
-        end
-
-        it 'does not send a get more message' do
-          expect(Mongo::Protocol::GetMore).not_to receive(:new)
-          cursor.each(&b)
-        end
-
-        it 'does not send a kill cursors message' do
-          expect(Mongo::Protocol::KillCursors).not_to receive(:new)
-          cursor.each(&b)
-        end
-      end
-
-      context 'when not all results are returned in one request' do
-        let(:delta) { 2 }
-        let(:responses) { results(0, limit.abs - delta)  }
-
-        it 'does not send a get more message' do
-          expect(Mongo::Protocol::GetMore).not_to receive(:new)
-          cursor.each(&b)
-        end
-      end
-    end
-
-    context 'when the query has a batch size greater than limit' do
-      let(:batch_size) { 6 }
-      let(:limit) { 5 }
-      let(:scope_opts) { { :limit => limit, :batch_size => batch_size } }
-
-      context 'when all docs are retreived in one request' do
-        let(:responses) { results(0, limit) }
-
-        it 'requests the limit number of docs in first query message' do
-          expect(Mongo::Protocol::Query).to receive(:new) do |a, b, c, opts|
-            expect(opts[:limit]).to eq(limit)
-          end
-          cursor.each(&b)
-        end
-
-        it 'does not send a get more message' do
-          expect(Mongo::Protocol::GetMore).not_to receive(:new)
-          cursor.each(&b)
-        end
-
-        it 'returns exactly that limit number of documents' do
-          expect do |b|
-            cursor.each(&b)
-          end.to yield_control.exactly(limit).times
-        end
-
-        it 'does not send a kill cursors message' do
-          expect(Mongo::Protocol::KillCursors).not_to receive(:new)
-          cursor.each(&b)
-        end
-      end
-
-      context 'when multiple requests are needed' do
-        let(:delta) { 2 }
-        let(:responses) do
-          [results(nonzero, limit - delta),
-           results(nonzero, delta)]
-        end
-
-        it 'requests the limit in the first query message' do
-          expect(Mongo::Protocol::Query).to receive(:new) do |a, b, c, opts|
-            expect(opts[:limit]).to eq(limit)
-          end
-          cursor.each(&b)
-        end
-
-        it 'requests the remaining docs in a get more message' do
-          expect(Mongo::Protocol::GetMore).to receive(:new) do |a, b, num, c|
-            expect(num).to eq(delta)
-          end
-          cursor.each(&b)
-        end
-
-        it 'returns exactly that limit number of documents' do
-          expect do |b|
-            cursor.each(&b)
-          end.to yield_control.exactly(limit).times
-        end
-
-        it 'sends a kill cursors message' do
-          expect(Mongo::Protocol::KillCursors).to receive(:new)
-          cursor.each(&b)
-        end
-      end
-    end
-
-    context 'when the query has a limit greater than batch size' do
-      let(:limit) { 15 }
-      let(:batch_size) { 5 }
-      let(:scope_opts) { { :limit => limit, :batch_size => batch_size } }
-      let(:responses) { [results(nonzero, batch_size) * 3] }
-
-      it 'requests the batch size in the first query message' do
-        expect(Mongo::Protocol::Query).to receive(:new) do |a, b, c, opts|
-          expect(opts[:limit]).to eq(batch_size)
-        end
-        cursor.each(&b)
-      end
-
-      it 'requests the batch size in each get more message' do
-        expect(Mongo::Protocol::GetMore).to receive(:new) do |a, b, num, c|
-          expect(num).to eq(batch_size)
-        end
-        expect(Mongo::Protocol::GetMore).to receive(:new) do |a, b, num, c|
-          expect(num).to eq(batch_size)
-        end
-        cursor.each(&b)
-      end
-
-      it 'returns exactly that limit number of documents' do
-        expect do |b|
-          cursor.each(&b)
-        end.to yield_control.exactly(limit).times
-      end
-
-      it 'sends a kill cursors message' do
-        expect(Mongo::Protocol::KillCursors).to receive(:new)
-        cursor.each(&b)
-      end
-    end
-
-    context 'when the query has a batch size set but no limit' do
-      let(:batch_size) { 6 }
-      let(:scope_opts) { { :batch_size => batch_size } }
-
-      context 'when all docs are retreived in one request' do
-        let(:responses) { results(0, batch_size) }
-
-        it 'requests the batch size in the first query message' do
-          expect(Mongo::Protocol::Query).to receive(:new) do |a, b, c, opts|
-            expect(opts[:limit]).to eq(batch_size)
-          end
-          cursor.each(&b)
-        end
-
-        it 'does not send a get more message' do
-          expect(Mongo::Protocol::GetMore).not_to receive(:new)
-          cursor.each(&b)
-        end
-
-        it 'returns exactly that batch size number of documents' do
-          expect do |b|
-            cursor.each(&b)
-          end.to yield_control.exactly(batch_size).times
-        end
-
-        it 'does not send a kill cursors message' do
-          expect(Mongo::Protocol::KillCursors).not_to receive(:new)
-          cursor.each(&b)
-        end
-      end
-
-      context 'when multiple requests are needed' do
-        let(:remaining) { 2 }
-        let(:responses) do
-          [results(nonzero, batch_size),
-           results(0, remaining)]
-        end
-
-        it 'requests the batch size in the first query message' do
-          expect(Mongo::Protocol::Query).to receive(:new) do |a, b, c, opts|
-            expect(opts[:limit]).to eq(batch_size)
-          end
-          cursor.each(&b)
-        end
-
-        it 'requests the batch size in a get more message' do
-          expect(Mongo::Protocol::GetMore).to receive(:new) do |a, b, num, c|
-            expect(num).to eq(batch_size)
-          end
-          cursor.each(&b)
-        end
-
-        it 'returns the number of documents matching the query' do
-          expect do |b|
-            cursor.each(&b)
-          end.to yield_control.exactly(batch_size + remaining).times
-        end
-
-        it 'sends a kill cursors message' do
-          expect(Mongo::Protocol::KillCursors).not_to receive(:new)
-          cursor.each(&b)
-        end
-      end
+    it 'returns a string containing the collection view inspect string' do
+      expect(cursor.inspect).to match(/.*#{view.inspect}.*/)
     end
   end
 end

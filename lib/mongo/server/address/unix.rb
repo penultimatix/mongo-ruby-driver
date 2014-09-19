@@ -18,13 +18,13 @@ module Mongo
 
       # Sets up socket addresses.
       #
-      # @since 3.0.0
+      # @since 2.0.0
       class Unix
         include Resolvable
 
         # The regular expression to use to match a socket path.
         #
-        # @since 3.0.0
+        # @since 2.0.0
         MATCH = Regexp.new('\.sock').freeze
 
         # Initialize the socket resolver.
@@ -34,9 +34,10 @@ module Mongo
         #
         # @param [ String ] address The socket path.
         #
-        # @since 3.0.0
+        # @since 2.0.0
         def initialize(address)
           @host = address
+          @seed = address
         end
 
         # Get a socket for the provided address type, given the options.
@@ -45,14 +46,24 @@ module Mongo
         #   ipv4.socket(5)
         #
         # @param [ Float ] timeout The socket timeout.
-        # @param [ Hash ] ssl_opts SSL options - ignored.
+        # @param [ Hash ] ssl_options SSL options - ignored.
         #
         # @return [ Pool::Socket::Unix ] The socket.
         #
-        # @since 3.0.0
-        def socket(timeout, ssl_opts = {})
-          Pool::Socket::Unix.new(host, timeout, Socket::AF_UNIX)
+        # @since 2.0.0
+        def socket(timeout, ssl_options = {})
+          Socket::Unix.new(host, timeout, Socket::AF_UNIX)
         end
+
+        # Get the address as a string.
+        #
+        # @example Get the address as a string.
+        #   ipv4.to_s
+        #
+        # @return [ String ] The nice string.
+        #
+        # @since 2.0.0
+        alias :to_s :host
       end
     end
   end

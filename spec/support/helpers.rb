@@ -72,4 +72,94 @@ dPMQD5JX6g5HKnHFg2mZtoXQrWmJSn7p8GJK8yNTopEErA==
     cert.sign(issuer_key, digest)
     cert
   end
+
+  def server(mode, options = {})
+    tags = options[:tags] || {}
+    ping = options[:ping] || 0
+
+    # @todo: take some of this out when server is finished
+    double(mode.to_s).tap do |server|
+      allow(server).to receive(:primary?) do
+        mode == :primary ? true : false
+      end
+      allow(server).to receive(:secondary?) do
+        mode == :secondary ? true :false
+      end
+      allow(server).to receive(:standalone?).and_return(false)
+      allow(server).to receive(:tags) { tags }
+      allow(server).to receive(:matches_tags?) do |tag_set|
+        server.tags.any? do |tag|
+          tag_set.each do |k,v|
+            tag.keys.include?(k) && tag[k] == v
+          end
+        end
+      end
+      allow(server).to receive(:ping_time) { ping }
+    end
+  end
+
+  def collection(name, db)
+    documents = []
+    double(name.to_s).tap do |coll|
+
+      allow(coll).to receive(:db) { db }
+
+      allow(coll).to receive(:save) do |doc|
+        coll.remove({ :_id => doc[:_id] })
+        coll.insert(doc)
+      end
+
+      allow(coll).to receive(:count) { documents.length }
+
+      allow(coll).to receive(:insert) do |doc|
+        if !coll.find({ :_id => doc[:_id] }).empty?
+          raise GridError, "duplicate key error, _id"
+        end
+        documents.push(doc)
+      end
+
+      allow(coll).to receive(:find_one) do |query|
+        result = nil
+        documents.each do |doc|
+          if matches(doc, query)
+            result = doc
+            break
+          end
+        end
+        result
+      end
+
+      allow(coll).to receive(:remove) do |query|
+        documents.dup.each do |doc|
+          if matches(doc, query)
+            documents.delete(doc)
+          end
+        end
+      end
+
+      allow(coll).to receive(:find) do |query|
+        results = []
+        documents.each do |doc|
+          if matches(doc, query)
+            results.push(doc)
+          end
+        end
+        results
+      end
+    end
+  end
+
+  # does only strict equivalence,
+  # {:n => 4} should work
+  # {:n => {"$gt" => 3}} will not work.
+  def matches(doc, query={})
+    match = true
+    query.each do |field, value|
+      if !doc[field] || doc[field] != value
+        match = false
+        break
+      end
+    end
+    match
+  end
 end

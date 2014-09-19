@@ -21,13 +21,21 @@ module Mongo
   # The client is the entry point to the driver and is the main object that
   # will be interacted with.
   #
-  # @since 3.0.0
+  # @since 2.0.0
   class Client
+    extend Forwardable
 
-    # @return [ Mongo::Cluster ] The cluster of nodes for the client.
+    # @return [ Mongo::Cluster ] The cluster of servers for the client.
     attr_reader :cluster
+
+    # @return [ Mongo::Database ] The database the client is operating on.
+    attr_reader :database
+
     # @return [ Hash ] The configuration options.
     attr_reader :options
+
+    # Delegate command execution to the current database.
+    def_delegators :@database, :command
 
     # Determine if this client is equivalent to another object.
     #
@@ -38,7 +46,7 @@ module Mongo
     #
     # @return [ true, false ] If the objects are equal.
     #
-    # @since 3.0.0
+    # @since 2.0.0
     def ==(other)
       return false unless other.is_a?(Client)
       cluster == other.cluster && options == other.options
@@ -51,12 +59,13 @@ module Mongo
     #   client[:users]
     #
     # @param [ String, Symbol ] collection_name The name of the collection.
+    # @param [ Hash ] options The options to the collection.
     #
     # @return [ Mongo::Collection ] The collection.
     #
-    # @since 3.0.0
-    def [](collection_name)
-      database[collection_name]
+    # @since 2.0.0
+    def [](collection_name, options = {})
+      database[collection_name, options]
     end
 
     # Get the hash value of the client.
@@ -66,29 +75,48 @@ module Mongo
     #
     # @return [ Integer ] The client hash value.
     #
-    # @since 3.0.0
+    # @since 2.0.0
     def hash
       [cluster, options].hash
     end
 
     # Instantiate a new driver client.
     #
-    # @example Instantiate a single node or mongos client.
+    # @example Instantiate a single server or mongos client.
     #   Mongo::Client.new([ '127.0.0.1:27017' ])
     #
     # @example Instantiate a client for a replica set.
     #   Mongo::Client.new([ '127.0.0.1:27017', '127.0.0.1:27021' ])
     #
-    # @param [ Array<String> ] addresses The array of server addresses in the
-    #   form of host:port.
+    # @param [ Array<String>, String ] addresses_or_uri The array of server addresses in the
+    #   form of host:port or a MongoDB URI connection string.
     # @param [ Hash ] options The options to be used by the client.
     #
-    # @since 3.0.0
-    def initialize(addresses, options = {})
-      @cluster = Cluster.new(self, addresses)
-      @options = options
-      db = options[:database]
-      use(db) if db
+    # @option options [ Symbol ] :auth_mech
+    # @option options [ String ] :auth_source
+    # @option options [ true, false ] :canonicalize_host_name
+    # @option options [ String ] :database
+    # @option options [ String ] :gssapi_service_name
+    # @option options [ Float ] :heartbeat_frequency
+    # @option options [ Symbol ] :mode
+    # @option options [ String ] :password
+    # @option options [ Integer ] :pool_size
+    # @option options [ Float ] :connect_timeout
+    # @option options [ Hash ] :read
+    # @option options [ Array<Hash, String> ] :roles
+    # @option options [ Symbol ] :replica_set_name
+    # @option options [ true, false ] :ssl
+    # @option options [ Float ] :socket_timeout
+    # @option options [ String ] :user
+    # @option options [ Symbol ] :write
+    #
+    # @since 2.0.0
+    def initialize(addresses_or_uri, options = {})
+      if addresses_or_uri.is_a?(::String)
+        create_from_uri(addresses_or_uri)
+      else
+        create_from_addresses(addresses_or_uri, options)
+      end
     end
 
     # Get an inspection of the client as a string.
@@ -98,9 +126,22 @@ module Mongo
     #
     # @return [ String ] The inspection string.
     #
-    # @since 3.0.0
+    # @since 2.0.0
     def inspect
       "<Mongo::Client:0x#{object_id} cluster=#{cluster.addresses.join(', ')}>"
+    end
+
+    # Get the server (read) preference from the options passed to the client.
+    #
+    # @example Get the server (read) preference.
+    #   client.server_preference
+    #
+    # @return [ Object ] The appropriate server preference or primary if none
+    #   was provided to the client.
+    #
+    # @since 2.0.0
+    def server_preference
+      @server_preference ||= ServerPreference.get(options[:read] || {})
     end
 
     # Use the database with the provided name. This will switch the current
@@ -109,13 +150,13 @@ module Mongo
     # @example Use the provided database.
     #   client.use(:users)
     #
-    # @param [ String, Symbol ] database_name The name of the database to use.
+    # @param [ String, Symbol ] name The name of the database to use.
     #
-    # @return [ Mongo::Database ] The database now being used.
+    # @return [ Mongo::Client ] The new client with new database.
     #
-    # @since 3.0.0
-    def use(database_name)
-      @database = Database.new(self, database_name)
+    # @since 2.0.0
+    def use(name)
+      with(database: name)
     end
 
     # Provides a new client with the passed options merged over the existing
@@ -123,13 +164,13 @@ module Mongo
     # without altering the original client.
     #
     # @example Get a client with changed options.
-    #   client.with(:read => :primary_preferred)
+    #   client.with(:read => { :mode => :primary_preferred })
     #
     # @param [ Hash ] new_options The new options to use.
     #
     # @return [ Mongo::Client ] A new client instance.
     #
-    # @since 3.0.0
+    # @since 2.0.0
     def with(new_options = {})
       Client.new(cluster.addresses.dup, options.merge(new_options))
     end
@@ -142,7 +183,7 @@ module Mongo
     #
     # @return [ Mongo::WriteConcern::Mode ] The write concern.
     #
-    # @since 3.0.0
+    # @since 2.0.0
     def write_concern
       @write_concern ||= WriteConcern::Mode.get(options[:write])
     end
@@ -150,12 +191,12 @@ module Mongo
     # Exception that is raised when trying to perform operations before ever
     # telling the client which database to execute ops on.
     #
-    # @since 3.0.0
+    # @since 2.0.0
     class NoDatabase < DriverError
 
       # The message does not need to be dynamic, so is held in a constant.
       #
-      # @since 3.0.0
+      # @since 2.0.0
       MESSAGE = 'No database has been set to operate on in the client. ' +
         'Please do so via: client.use(:db_name).'
 
@@ -164,49 +205,25 @@ module Mongo
       # @example Instantiate the exception.
       #   NoDatabase.new
       #
-      # @since 3.0.0
+      # @since 2.0.0
       def initialize
         super(MESSAGE)
       end
     end
 
-    class << self
-
-      # Gets a new client given the provided uri connection string.
-      #
-      # @example Get a client from the connection string.
-      #   Mongo::Client.connect("mongodb://127.0.0.1:27017/testdb?w=3")
-      #
-      # @param [ String ] connection_string The connection string.
-      #
-      # @see http://docs.mongodb.org/manual/reference/connection-string/
-      #
-      # @since 3.0.0
-      def connect(connection_string)
-        uri = URI.new(connection_string)
-        client = new(uri.nodes, uri.options)
-        database = uri.database
-        client.use(database) if database
-        client
-      end
-    end
-
     private
 
-    # Get the current database that the client is operating on.
-    #
-    # @api private
-    #
-    # @example Get the current database.
-    #   client.database
-    #
-    # @raise [ Mongo::NoDatabase ] If no database has been set.
-    #
-    # @return [ Mongo::Database ] The current database.
-    #
-    # @since 3.0.0
-    def database
-      @database || raise(NoDatabase.new)
+    def create_from_addresses(addresses, options = {})
+      @cluster = Cluster.new(self, addresses, options)
+      @options = options.freeze
+      @database = Database.new(self, options[:database])
+    end
+
+    def create_from_uri(connection_string)
+      uri = URI.new(connection_string)
+      @cluster = Cluster.new(self, uri.servers)
+      @options = uri.client_options.freeze
+      @database = Database.new(self, options[:database])
     end
   end
 end

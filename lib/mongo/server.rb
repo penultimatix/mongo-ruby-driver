@@ -13,40 +13,76 @@
 # limitations under the License.
 
 require 'mongo/server/address'
+require 'mongo/server/context'
 require 'mongo/server/description'
-require 'mongo/server/refresh'
+require 'mongo/server/monitor'
 
 module Mongo
 
   # Represents a single server on the server side that can be standalone, part of
   # a replica set, or a mongos.
   #
-  # @since 3.0.0
+  # @since 2.0.0
   class Server
     include Event::Publisher
-    include Event::Subscriber
-
-    # The default time for a server to refresh its status is 5 seconds.
-    #
-    # @since 3.0.0
-    REFRESH_INTERVAL = 5.freeze
-
-    # The command used for determining server status.
-    #
-    # @since 3.0.0
-    STATUS = { :ismaster => 1 }.freeze
+    extend Forwardable
 
     # @return [ String ] The configured address for the server.
     attr_reader :address
     # @return [ Server::Description ] The description of the server.
     attr_reader :description
-    # @return [ Mutex ] The refresh operation mutex.
-    attr_reader :mutex
     # @return [ Hash ] The options hash.
     attr_reader :options
 
+    def_delegators :@description,
+                   :max_wire_version,
+                   :max_write_batch_size,
+                   :mongos?,
+                   :primary?,
+                   :replica_set_name,
+                   :secondary?,
+                   :standalone?,
+                   :write_command_enabled?
+
+    # Is this server equal to another?
+    #
+    # @example Is the server equal to the other?
+    #   server == other
+    #
+    # @param [ Object ] other The object to compare to.
+    #
+    # @return [ true, false ] If the servers are equal.
+    #
+    # @since 2.0.0
     def ==(other)
+      return false unless other.is_a?(Server)
       address == other.address
+    end
+
+    # Get a new context for this server in which to send messages.
+    #
+    # @example Get the server context.
+    #   server.context
+    #
+    # @return [ Mongo::Server::Context ] The server context.
+    #
+    # @since 2.0.0
+    def context
+      Context.new(self)
+    end
+
+    # Disconnect the server from the connection.
+    #
+    # @example Disconnect the server.
+    #   server.disconnect!
+    #
+    # @return [ true ] Always tru with no exception.
+    #
+    # @since 2.0.0
+    def disconnect!
+      context.with_connection do |connection|
+        connection.disconnect!
+      end and true
     end
 
     # Instantiate a new server object. Will start the background refresh and
@@ -58,97 +94,38 @@ module Mongo
     # @param [ String ] address The host:port address to connect to.
     # @param [ Hash ] options The server options.
     #
-    # @since 3.0.0
+    # @since 2.0.0
     def initialize(address, options = {})
       @address = Address.new(address)
-      @options = options
+      @options = options.freeze
       @mutex = Mutex.new
-      initialize_description!
-      @refresh = Refresh.new(self, refresh_interval)
-      @refresh.run
+      @monitor = Monitor.new(self, options)
+      @description = Description.new(self)
+      @monitor.run
     end
 
-    def operable?
-      true
+    # Get a pretty printed server inspection.
+    #
+    # @example Get the server inspection.
+    #   server.inspec
+    #
+    # @return [ String ] The nice inspection string.
+    #
+    # @since 2.0.0
+    def inspect
+      "#<Mongo::Server:0x#{object_id} address=#{address.host}:#{address.port}"
     end
 
-    # Refresh the configuration for this server. Is thread-safe since the
-    # periodic refresh is invoked from another thread in order not to continue
-    # blocking operations on the current thread.
+    # Get the connection pool for this server.
     #
-    # @example Refresh the server.
-    #   server.refresh!
+    # @example Get the connection pool for the server.
+    #   server.pool
     #
-    # @note Is mutable in that the underlying server description can get
-    #   mutated on this call.
+    # @return [ Mongo::Pool ] The connection pool.
     #
-    # @return [ Server::Description ] The updated server description.
-    #
-    # @since 3.0.0
-    def refresh!
-      mutex.synchronize do
-        description.update!(dispatch([ refresh_command ]))
-      end
-    end
-
-    # Dispatch the provided messages to the server. If the last message
-    # requires a response a reply will be returned.
-    #
-    # @example Dispatch the messages.
-    #   server.dispatch([ insert, command ])
-    #
-    # @note This method is named dispatch since 'send' is a core Ruby method on
-    #   all objects.
-    #
-    # @param [ Array<Message> ] messages The messages to dispatch.
-    #
-    # @return [ Protocol::Reply ] The reply if needed.
-    #
-    # @since 3.0.0
-    def dispatch(messages)
-      with_connection do |connection|
-        connection.write(messages)
-        connection.read if messages.last.replyable?
-      end
-    end
-
-    # Get the refresh interval for the server. This will be defined via an option
-    # or will default to 5.
-    #
-    # @example Get the refresh interval.
-    #   server.refresh_interval
-    #
-    # @return [ Integer ] The refresh interval, in seconds.
-    #
-    # @since 3.0.0
-    def refresh_interval
-      @refresh_interval ||= options[:refresh_interval] || REFRESH_INTERVAL
-    end
-
-    private
-
-    def initialize_description!
-      # @description = Description.new(dispatch([ refresh_command ]))
-      # subscribe_to(description, Event::HOST_ADDED, Event::HostAdded.new(self))
-      # subscribe_to(description, Event::HOST_REMOVED, Event::HostRemoved.new(self))
-    end
-
+    # @since 2.0.0
     def pool
       @pool ||= Pool.get(self)
-    end
-
-    # @todo: Need to sort out read preference here.
-    def refresh_command
-      Protocol::Query.new(
-        Database::ADMIN,
-        Database::COMMAND,
-        STATUS,
-        :limit => -1
-      )
-    end
-
-    def with_connection
-      pool.with_connection { |conn| yield(conn) }
     end
   end
 end

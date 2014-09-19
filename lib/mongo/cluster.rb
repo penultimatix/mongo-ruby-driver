@@ -12,14 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+require 'mongo/cluster/mode'
+
 module Mongo
 
   # Represents a group of servers on the server side, either as a single server, a
   # replica set, or a single or multiple mongos.
   #
-  # @since 3.0.0
+  # @since 2.0.0
   class Cluster
-    # include Subscriber
+    include Event::Subscriber
+    include Loggable
+
+    # Constant for the replica set name configuration option.
+    #
+    # @since 2.0.0
+    REPLICA_SET_NAME = :replica_set_name.freeze
 
     # @return [ Mongo::Client ] The cluster's client.
     attr_reader :client
@@ -27,6 +35,8 @@ module Mongo
     attr_reader :addresses
     # @return [ Hash ] The options hash.
     attr_reader :options
+    # @return [ Object ] The cluster mode.
+    attr_reader :mode
 
     # Determine if this cluster of servers is equal to another object. Checks the
     # servers currently in the cluster, not what was configured.
@@ -38,7 +48,7 @@ module Mongo
     #
     # @return [ true, false ] If the objects are equal.
     #
-    # @since 3.0.0
+    # @since 2.0.0
     def ==(other)
       return false unless other.is_a?(Cluster)
       addresses == other.addresses
@@ -53,11 +63,12 @@ module Mongo
     #
     # @param [ String ] address The address of the server to add.
     #
-    # @return [ Node ] The newly added server, if not present already.
+    # @return [ Server ] The newly added server, if not present already.
     #
-    # @since 3.0.0
+    # @since 2.0.0
     def add(address)
       unless addresses.include?(address)
+        log(:debug, 'MONGODB', [ "Adding #{address} to the cluster." ])
         server = Server.new(address, options)
         addresses.push(address)
         @servers.push(server)
@@ -73,17 +84,57 @@ module Mongo
     # @param [ Array<String> ] addresses The addresses of the configured servers.
     # @param [ Hash ] options The options.
     #
-    # @since 3.0.0
+    # @since 2.0.0
     def initialize(client, addresses, options = {})
       @client = client
       @addresses = addresses
-      @options = options
+      @options = options.freeze
+      @mode = Mode.get(options)
       @servers = addresses.map do |address|
-        Server.new(address, options)
-        # subscribe_to(server, Event::SERVER_ADDED, ServerAddedListener.new(self))
-        # subscribe_to(server, Event::SERVER_REMOVED, ServerRemovedListener.new(self))
-        # server
+        Server.new(address, options).tap do |server|
+          subscribe_to(server, Event::SERVER_ADDED, Event::ServerAdded.new(self))
+          subscribe_to(server, Event::SERVER_REMOVED, Event::ServerRemoved.new(self))
+        end
       end
+    end
+
+    # Get the next primary server we can send an operation to.
+    #
+    # @example Get the next primary server.
+    #   cluster.next_primary
+    #
+    # @return [ Mongo::Server ] A primary server.
+    #
+    # @since 2.0.0
+    def next_primary
+      client.server_preference.primary(servers).first
+    end
+
+    # Removed the server from the cluster for the provided address, if it
+    # exists.
+    #
+    # @example Remove the server from the cluster.
+    #   server.remove('127.0.0.1:27017')
+    #
+    # @param [ String ] address The host/port or socket address.
+    #
+    # @since 2.0.0
+    def remove(address)
+      removed_servers = @servers.reject!{ |server| server.address.seed == address }
+      removed_servers.each{ |server| server.disconnect! } if removed_servers
+      addresses.reject!{ |addr| addr == address }
+    end
+
+    # Get the replica set name configured for this cluster.
+    #
+    # @example Get the replica set name.
+    #   cluster.replica_set_name
+    #
+    # @return [ String ] The name of the configured replica set.
+    #
+    # @since 2.0.0
+    def replica_set_name
+      options[REPLICA_SET_NAME]
     end
 
     # Get a list of server candidates from the cluster that can have operations
@@ -92,11 +143,23 @@ module Mongo
     # @example Get the server candidates for an operation.
     #   cluster.servers
     #
-    # @return [ Array<Node> ] The candidate servers.
+    # @return [ Array<Server> ] The candidate servers.
     #
-    # @since 3.0.0
+    # @since 2.0.0
     def servers
-      @servers.select { |server| server.operable? }
+      mode.servers(@servers, replica_set_name)
+    end
+
+    # Is this cluster part of a sharded (mongos) cluster?
+    #
+    # @example Is the cluster a sharded cluster?
+    #   cluster.sharded?
+    #
+    # @return [ true, false ] If the cluster is sharded.
+    #
+    # @since 2.0.0
+    def sharded?
+      mode == Mode::Sharded
     end
   end
 end
