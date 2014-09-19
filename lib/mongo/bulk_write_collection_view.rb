@@ -294,8 +294,15 @@ module Mongo
         elsif op_type == :update
           n_upserted = 0
           if (upserted = response.fetch("upserted", nil)) # assignment
-            upserted = [{"_id" => upserted}] if upserted.class == BSON::ObjectId # OP_UPDATE non-array
+            upserted = [{"_id" => upserted}] if upserted.class != Array # OP_UPDATE non-array
             n_upserted = upserted.size
+            concat(result, "upserted", merge_indexes(upserted, exchange))
+          elsif (response["updatedExisting"] == false && n == 1)
+            # workaround for DRIVERS-151 (non-ObjectID _id fields in pre-2.6 servers)
+            op = exchange[:batch][0]
+            missing_id = op[:u].fetch(:_id, op[:q][:_id]) # _id in update document takes precedence
+            upserted = [ { "_id" => missing_id, "index" => 0 } ]
+            n_upserted = n
             concat(result, "upserted", merge_indexes(upserted, exchange))
           end
           tally(result, "nUpserted", n_upserted) if n_upserted > 0

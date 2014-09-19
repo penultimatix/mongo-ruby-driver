@@ -145,7 +145,7 @@ class ClientTest < Test::Unit::TestCase
   end
 
   def test_from_uri_write_concern
-    con = MongoClient.from_uri("mongodb://#{host_port}")
+    con = MongoClient.from_uri(TEST_URI)
     db = con.db
     coll = db.collection('from-uri-test')
     assert_equal BSON::ObjectId, coll.insert({'a' => 1}).class
@@ -182,33 +182,36 @@ class ClientTest < Test::Unit::TestCase
   end
 
   def test_database_info
-    @client.drop_database(TEST_DB)
-    @client.db(TEST_DB).collection('info-test').insert('a' => 1)
+    db_name = 'ruby_test'
+    @client.drop_database(db_name)
+    @client.db(db_name).collection('info-test').insert('a' => 1)
 
     info = @client.database_info
     assert_not_nil info
     assert_kind_of Hash, info
-    assert_not_nil info[TEST_DB]
-    assert info[TEST_DB] > 0
+    assert_not_nil info[db_name]
+    assert info[db_name] > 0
 
-    @client.drop_database(TEST_DB)
+    @client.drop_database(db_name)
   end
 
   def test_copy_database
-    old_name = TEST_DB + '_old'
-    new_name = TEST_DB + '_new'
+    return unless @client.server_version >= '2.5' ||
+                  @client.server_version < '2.4'
+    old_db = @client['ruby-test-old']
+    new_db = @client['ruby-test-new']
+    coll = 'copy-test'
 
-    @client.drop_database(new_name)
-    @client.db(old_name).collection('copy-test').insert('a' => 1)
-    @client.copy_database(old_name, new_name, host_port)
-
-    old_object = @client.db(old_name).collection('copy-test').find.next_document
-    new_object = @client.db(new_name).collection('copy-test').find.next_document
-    assert_equal old_object, new_object
+    old_db[coll].insert('a' => 1)
+    @client.drop_database(new_db.name)
+    silently { old_db.add_user('chevy', 'chase') }
+    @client.copy_database(old_db.name, new_db.name, host_port, 'chevy', 'chase')
+    old_db.remove_user('chevy')
+    assert_equal old_db[coll].find_one, new_db[coll].find_one
   end
 
   def test_database_names
-    @client.drop_database(TEST_DB)
+    @client.db(TEST_DB).collection('info-test').remove({})
     @client.db(TEST_DB).collection('info-test').insert('a' => 1)
 
     names = @client.database_names
@@ -429,21 +432,17 @@ class ClientTest < Test::Unit::TestCase
 
   context "Saved authentications" do
     setup do
-      @client = standard_connection
+      @client = Mongo::MongoClient.new
 
       @auth = {
-        :db_name   => TEST_DB,
-        :username  => 'bob',
-        :password  => 'secret',
-        :source    => TEST_DB,
-        :mechanism => 'MONGODB-CR'
+          :db_name   => TEST_DB,
+          :username  => TEST_USER,
+          :password  => TEST_USER_PWD,
+          :source    => TEST_DB,
+          :mechanism => 'MONGODB-CR'
       }
 
       @client.auths << @auth
-    end
-
-    teardown do
-      @client.clear_auths
     end
 
     should "save and validate the authentication" do
@@ -451,22 +450,22 @@ class ClientTest < Test::Unit::TestCase
     end
 
     should "not allow multiple authentications for the same db" do
-      auth = {
-        :db_name   => TEST_DB,
-        :username  => 'mickey',
-        :password  => 'm0u53',
-        :source    => nil,
-        :mechanism => nil
-      }
+       auth = {
+         :db_name   => TEST_DB,
+         :username  => TEST_USER,
+         :password  => TEST_USER_PWD,
+         :source    => TEST_DB,
+         :mechanism => nil
+       }
 
-      assert_raise Mongo::MongoArgumentError do
-        @client.add_auth(
-          auth[:db_name],
-          auth[:username],
-          auth[:password],
-          auth[:source],
-          auth[:mechanism])
-      end
+       assert_raise Mongo::MongoArgumentError do
+         @client.add_auth(
+           auth[:db_name],
+           auth[:username],
+           auth[:password],
+           auth[:source],
+           auth[:mechanism])
+       end
     end
 
     should "remove auths by database" do
@@ -523,7 +522,7 @@ class ClientTest < Test::Unit::TestCase
 
   context "Connection exceptions" do
     setup do
-      @con = standard_connection(:pool_size => 10, :pool_timeout => 10)
+      @con = MongoClient.new(TEST_HOST, TEST_PORT, :pool_size => 10, :pool_timeout => 10)
       @coll = @con[TEST_DB]['test-connection-exceptions']
     end
 

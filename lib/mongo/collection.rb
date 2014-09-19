@@ -518,8 +518,9 @@ module Mongo
     # @option opts [Boolean] :unique (false) if true, this index will enforce a uniqueness constraint.
     # @option opts [Boolean] :background (false) indicate that the index should be built in the background. This
     #   feature is only available in MongoDB >= 1.3.2.
-    # @option opts [Boolean] :drop_dups (nil) If creating a unique index on a collection with pre-existing records,
-    #   this option will keep the first document the database indexes and drop all subsequent with duplicate values.
+    # @option opts [Boolean] :drop_dups (nil) (DEPRECATED) If creating a unique index on a collection with
+    #   pre-existing records, this option will keep the first document the database indexes and drop all subsequent
+    #   with duplicate values.
     # @option opts [Integer] :bucket_size (nil) For use with geoHaystack indexes. Number of documents to group
     #   together within a certain proximity to a given longitude and latitude.
     # @option opts [Integer] :min (nil) specify the minimum longitude and latitude for a geo index.
@@ -545,15 +546,19 @@ module Mongo
     # @example A geospatial index with alternate longitude and latitude:
     #   @restaurants.create_index([['location', Mongo::GEO2D]], :min => 500, :max => 500)
     #
+    # @note The :drop_dups option is no longer supported by MongoDB starting with server version 2.7.5.
+    #   The option is silently ignored by the server and unique index builds using the option will
+    #   fail if a duplicate value is detected.
+    #
     # @return [String] the name of the index created.
     def create_index(spec, opts={})
-      opts[:dropDups]   = opts[:drop_dups] if opts[:drop_dups]
-      opts[:bucketSize] = opts[:bucket_size] if opts[:bucket_size]
-      field_spec        = parse_index_spec(spec)
-      opts              = opts.dup
-      name              = opts.delete(:name) || generate_index_name(field_spec)
-      name              = name.to_s if name
-      generate_indexes(field_spec, name, opts)
+      options              = opts.dup
+      options[:dropDups]   = options.delete(:drop_dups) if options[:drop_dups]
+      options[:bucketSize] = options.delete(:bucket_size) if options[:bucket_size]
+      field_spec           = parse_index_spec(spec)
+      name                 = options.delete(:name) || generate_index_name(field_spec)
+      name                 = name.to_s if name
+      generate_indexes(field_spec, name, options)
       name
     end
 
@@ -572,17 +577,22 @@ module Mongo
     #   Time t+10min : @posts.ensure_index(:subject => Mongo::ASCENDING) -- calls create_index and
     #     resets the 5 minute counter
     #
+    # @note The :drop_dups option is no longer supported by MongoDB starting with server version 2.7.5.
+    #   The option is silently ignored by the server and unique index builds using the option will
+    #   fail if a duplicate value is detected.
+    #
     # @return [String] the name of the index.
     def ensure_index(spec, opts={})
-      now               = Time.now.utc.to_i
-      opts[:dropDups]   = opts[:drop_dups] if opts[:drop_dups]
-      opts[:bucketSize] = opts[:bucket_size] if opts[:bucket_size]
-      field_spec        = parse_index_spec(spec)
-      name              = opts[:name] || generate_index_name(field_spec)
-      name              = name.to_s if name
+      now                  = Time.now.utc.to_i
+      options              = opts.dup
+      options[:dropDups]   = options.delete(:drop_dups) if options[:drop_dups]
+      options[:bucketSize] = options.delete(:bucket_size) if options[:bucket_size]
+      field_spec           = parse_index_spec(spec)
+      name                 = options.delete(:name) || generate_index_name(field_spec)
+      name                 = name.to_s if name
 
       if !@cache[name] || @cache[name] <= now
-        generate_indexes(field_spec, name, opts)
+        generate_indexes(field_spec, name, options)
       end
 
       # Reset the cache here in case there are any errors inserting. Best to be safe.
@@ -1029,6 +1039,10 @@ module Mongo
     # @option opts [Hash] :query ({}) A query selector for filtering the documents counted.
     # @option opts [Integer] :skip (nil) The number of documents to skip.
     # @option opts [Integer] :limit (nil) The number of documents to limit.
+    # @option opts [String, Array, OrderedHash] :hint hint for query optimizer, usually not necessary if
+    #   using MongoDB > 1.1. This option is only supported with #count in server version > 2.6.
+    # @option opts [String] :named_hint for specifying a named index as a hint, will be overridden by :hint
+    #   if :hint is also provided. This option is only supported with #count in server version > 2.6.
     # @option opts [:primary, :secondary] :read Read preference for this command. See Collection#find for
     #  more details.
     # @option opts [String]  :comment (nil) a comment to include in profiling logs
@@ -1036,12 +1050,13 @@ module Mongo
     # @return [Integer]
     def count(opts={})
       find(opts[:query],
-           :skip  => opts[:skip],
-           :limit => opts[:limit],
-           :read  => opts[:read],
-           :comment => opts[:comment]).count(true)
+           :skip       => opts[:skip],
+           :limit      => opts[:limit],
+           :named_hint => opts[:named_hint] || @hint,
+           :hint       => opts[:hint] || @hint,
+           :read       => opts[:read],
+           :comment    => opts[:comment]).count(true)
     end
-
     alias :size :count
 
     protected
@@ -1130,7 +1145,7 @@ module Mongo
         cmd = BSON::OrderedHash[:createIndexes, @name, :indexes, [selector]]
         @db.command(cmd)
       rescue Mongo::OperationFailure => ex
-        if ex.error_code == Mongo::ErrorCode::COMMAND_NOT_FOUND || ex.error_code.nil?
+        if Mongo::ErrorCode::COMMAND_NOT_FOUND_CODES.include?(ex.error_code)
           selector[:ns] = "#{@db.name}.#{@name}"
           send_write(:insert, nil, selector, false, {:w => 1}, Mongo::DB::SYSTEM_INDEX_COLLECTION)
         else

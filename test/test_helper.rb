@@ -43,6 +43,11 @@ require 'mocha/setup'
 # cluster manager
 require 'tools/mongo_config'
 
+# For kerberos testing.
+begin
+  require 'mongo_kerberos'
+rescue LoadError; end
+
 # test helpers
 require 'helpers/general'
 require 'helpers/test_unit'

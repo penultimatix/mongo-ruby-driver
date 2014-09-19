@@ -45,7 +45,6 @@ task :test => 'test:ext'
 task :default => ['test:without_ext', 'test:ext']
 
 namespace :test do
-
   ENV['TEST_MODE'] = 'true'
 
   desc 'Runs all test suites (excludes RS and SC tests under CI)'
@@ -66,7 +65,13 @@ namespace :test do
     t.test_files = files
     t.libs << 'test'
   end
-  task :commit => 'default'
+  task :commit => :default
+
+  # Both the functional and replica_set tests will use the kerberos C ext
+  # when testing GSSAPI. So we must compile when on MRI.
+  task :default     => 'compile:csasl' unless RUBY_PLATFORM =~ /java/
+  task :functional  => 'compile:csasl' unless RUBY_PLATFORM =~ /java/
+  task :replica_set => 'compile:csasl' unless RUBY_PLATFORM =~ /java/
 
   desc 'Outputs diagnostic information for troubleshooting test failures.'
   task :diagnostic do
@@ -81,7 +86,7 @@ namespace :test do
   end
 
   desc 'Runs all test suites with extensions.'
-  task :ext => 'test:cleanup' do
+  task :ext do
     puts '[INFO] Enabling BSON extension...'
     ENV.delete('BSON_EXT_DISABLED')
     Rake::Task['compile'].invoke unless RUBY_PLATFORM =~ /java/
@@ -90,7 +95,7 @@ namespace :test do
   end
 
   desc 'Runs all test suites without any extensions.'
-  task :without_ext => 'test:cleanup'  do
+  task :without_ext do
     puts '[INFO] Disabling BSON extension...'
     ENV['BSON_EXT_DISABLED'] = 'true'
     Rake::Task['test:default'].reenable
@@ -109,34 +114,14 @@ namespace :test do
     end
   end
 
-  # Runs after all tests and automatically as a pre-requisite in some cases.
-  # There's no need to ever invoke this directly.
   task :cleanup do |t|
-    begin
-      $LOAD_PATH.unshift(File.join(File.dirname(__FILE__), '..', 'lib'))
-      require 'mongo'
-      client = Mongo::MongoClient.new(ENV['MONGO_RUBY_DRIVER_HOST'] || 'localhost',
-                                      ENV['MONGO_RUBY_DRIVER_PORT'] || Mongo::MongoClient::DEFAULT_PORT)
-      client.database_names.each do |db_name|
-        if db_name =~ /^ruby_test*/
-          puts "[CLEAN-UP] Dropping '#{db_name}'..."
-          client.drop_database(db_name)
-        end
-      end
-    rescue Mongo::ConnectionFailure => e
-      # moving on anyway
-    end
-
-    %w(data tmp coverage lib/bson_ext).each do |dir|
+    %w(data tmp coverage lib/bson_ext lib/csasl).each do |dir|
       if File.directory?(dir)
         puts "[CLEAN-UP] Removing '#{dir}'..."
         FileUtils.rm_rf(dir)
       end
     end
-
     t.reenable
   end
-
+  Rake.application.top_level_tasks << 'test:cleanup'
 end
-
-Rake.application.top_level_tasks << 'test:cleanup'

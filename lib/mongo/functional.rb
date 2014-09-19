@@ -17,5 +17,3 @@ require 'mongo/functional/logging'
 require 'mongo/functional/read_preference'
 require 'mongo/functional/write_concern'
 require 'mongo/functional/uri_parser'
-
-require 'mongo/functional/sasl_java' if RUBY_PLATFORM =~ /java/

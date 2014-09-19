@@ -73,9 +73,7 @@ class ReplicaSetBasicTest < Test::Unit::TestCase
   end
 
   def test_accessors
-    seeds = @rs.repl_set_seeds
-    args = {:name => @rs.repl_set_name}
-    client = MongoReplicaSetClient.new(seeds, args)
+    client = MongoReplicaSetClient.from_uri(@uri)
     assert_equal @rs.primary_name, [client.host, client.port].join(':')
     assert_equal client.host, client.primary_pool.host
     assert_equal client.port, client.primary_pool.port
@@ -89,9 +87,7 @@ class ReplicaSetBasicTest < Test::Unit::TestCase
   end
 
   def test_write_commands_and_operations
-    seeds = @rs.repl_set_seeds
-    args = {:name => @rs.repl_set_name}
-    @client = MongoReplicaSetClient.new(seeds, args)
+    @client = MongoReplicaSetClient.from_uri(@uri)
     @coll = @client[TEST_DB]['test-write-commands-and-operations']
     with_write_commands_and_operations(@client) do
       @coll.remove
@@ -100,12 +96,24 @@ class ReplicaSetBasicTest < Test::Unit::TestCase
     end
   end
 
+  def test_wnote_does_not_raise_exception_with_err_nil
+    @client = MongoReplicaSetClient.from_uri(@uri)
+    if @client.server_version < '2.5.5'
+      @coll = @client[TEST_DB]['test-wnote']
+      begin
+        result = @coll.remove({:foo => 1}, :w => 2)
+      rescue => ex
+        assert(false, "should not raise an exception for a wnote response field from a remove that does not match any documents")
+      end
+      assert_nil result["err"]
+      assert_true result.has_key?("wnote")
+    end
+  end
+
   context "Socket pools" do
     context "checking out writers" do
       setup do
-        seeds = @rs.repl_set_seeds
-        args = {:name => @rs.repl_set_name}
-        @client = MongoReplicaSetClient.new(seeds, args)
+        @client = MongoReplicaSetClient.from_uri(@uri)
         @coll = @client[TEST_DB]['test-connection-exceptions']
       end
 
@@ -154,9 +162,7 @@ class ReplicaSetBasicTest < Test::Unit::TestCase
 
     context "checking out readers" do
       setup do
-        seeds = @rs.repl_set_seeds
-        args = {:name => @rs.repl_set_name}
-        @client = MongoReplicaSetClient.new(seeds, args)
+        @client = MongoReplicaSetClient.from_uri(@uri)
         @coll = @client[TEST_DB]['test-connection-exceptions']
       end
 

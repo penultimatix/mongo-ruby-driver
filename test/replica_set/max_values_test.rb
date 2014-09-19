@@ -20,7 +20,7 @@ class MaxValuesTest < Test::Unit::TestCase
 
   def setup
     ensure_cluster(:rs)
-    @client = MongoReplicaSetClient.new(@rs.repl_set_seeds, :name => @rs.repl_set_name)
+    @client = MongoReplicaSetClient.from_uri(@uri)
     @db = new_mock_db
     @client.stubs(:[]).returns(@db)
     @ismaster = {
@@ -140,6 +140,12 @@ class MaxValuesTest < Test::Unit::TestCase
     assert_equal Mongo::MongoClient::DEFAULT_MAX_WRITE_BATCH_SIZE, @client.max_write_batch_size
     @client.local_manager.primary_pool.node.stubs(:max_write_batch_size).returns(999)
     assert_equal 999, @client.max_write_batch_size
+  end
+
+  def test_max_write_batch_size_no_manager
+    # Simulate no local manager being set yet - RUBY-759
+    @client.stubs(:local_manager).returns(nil)
+    assert_equal Mongo::MongoClient::DEFAULT_MAX_WRITE_BATCH_SIZE, @client.max_write_batch_size
   end
 end
 
