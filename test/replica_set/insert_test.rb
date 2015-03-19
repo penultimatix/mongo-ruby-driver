@@ -18,7 +18,7 @@ class ReplicaSetInsertTest < Test::Unit::TestCase
 
   def setup
     ensure_cluster(:rs)
-    @client = MongoReplicaSetClient.from_uri(@uri)
+    @client = MongoReplicaSetClient.from_uri(@uri, :op_timeout => TEST_OP_TIMEOUT)
     @version = @client.server_version
     @db = @client.db(TEST_DB)
     @db.drop_collection("test-sets")
@@ -68,47 +68,64 @@ class ReplicaSetInsertTest < Test::Unit::TestCase
     end
 
     should "handle error with deferred write concern error - spec Merging Results" do
-      with_write_commands_and_operations(@db.connection) do |wire_version|
+      if @client.wire_version_feature?(MongoClient::MONGODB_3_0)
         @coll.remove
         @coll.ensure_index(BSON::OrderedHash[:a, Mongo::ASCENDING], {:unique => true})
         bulk = @coll.initialize_ordered_bulk_op
         bulk.insert({:a => 1})
         bulk.find({:a => 2}).upsert.update({'$set' => {:a => 2}})
         bulk.insert({:a => 1})
+        secondary = MongoClient.new(@rs.secondaries.first.host, @rs.secondaries.first.port)
+        cmd = BSON::OrderedHash[:configureFailPoint, 'rsSyncApplyStop', :mode, 'alwaysOn']
+        secondary['admin'].command(cmd)
         ex = assert_raise BulkWriteError do
-          bulk.execute({:w => 5, :wtimeout => 1})
+          bulk.execute({:w => @rs.servers.size, :wtimeout => 1})
         end
-        result = ex.result
-        assert_match_document(
-            {
-                "ok" => 1,
-                "n" => 2,
-                "writeErrors" => [
-                    {
-                        "index" => 2,
-                        "code" => 11000,
-                        "errmsg" => /duplicate key error/,
-                    }
-                ],
-                "writeConcernError" => [
-                    {
-                        "errmsg" => /waiting for replication timed out|timed out waiting for slaves|timeout/,
-                        "code" => 64,
-                        "errInfo" => {"wtimeout" => true},
-                        "index" => 0
-                    },
-                    {
-                        "errmsg" => /waiting for replication timed out|timed out waiting for slaves|timeout/,
-                        "code" => 64,
-                        "errInfo" => {"wtimeout" => true},
-                        "index" => 1
-                    }
-                ],
-                "code" => 65,
-                "errmsg" => "batch item errors occurred",
-                "nInserted" => 1
-            }, result, "wire_version:#{wire_version}")
+        cmd = BSON::OrderedHash[:configureFailPoint, 'rsSyncApplyStop', :mode, 'off']
+        secondary['admin'].command(cmd)
+      else
+        with_write_commands_and_operations(@db.connection) do |wire_version|
+          @coll.remove
+          @coll.ensure_index(BSON::OrderedHash[:a, Mongo::ASCENDING], {:unique => true})
+          bulk = @coll.initialize_ordered_bulk_op
+          bulk.insert({:a => 1})
+          bulk.find({:a => 2}).upsert.update({'$set' => {:a => 2}})
+          bulk.insert({:a => 1})
+          ex = assert_raise BulkWriteError do
+            bulk.execute({:w => 5, :wtimeout => 1})
+          end
+        end
       end
+      result = ex.result
+      assert_match_document(
+          {
+              "ok" => 1,
+              "n" => 2,
+              "writeErrors" => [
+                  {
+                      "index" => 2,
+                      "code" => 11000,
+                      "errmsg" => /duplicate key error/,
+                  }
+              ],
+              "writeConcernError" => [
+                  {
+                      "errmsg" => /waiting for replication timed out|timed out waiting for slaves|timeout/,
+                      "code" => 64,
+                      "errInfo" => {"wtimeout" => true},
+                      "index" => 0
+                  },
+                  {
+                      "errmsg" => /waiting for replication timed out|timed out waiting for slaves|timeout/,
+                      "code" => 64,
+                      "errInfo" => {"wtimeout" => true},
+                      "index" => 1
+                  }
+              ],
+              "code" => 65,
+              "errmsg" => "batch item errors occurred",
+              "nInserted" => 1
+          }, result)
       assert_equal 2, @coll.find.to_a.size
     end
 

@@ -26,7 +26,7 @@ class ReplicaSetClientTest < Test::Unit::TestCase
   end
 
   def test_reconnection
-    @client = MongoReplicaSetClient.from_uri(@uri)
+    @client = MongoReplicaSetClient.from_uri(@uri, :op_timeout => TEST_OP_TIMEOUT)
     assert @client.connected?
 
     manager = @client.local_manager
@@ -216,6 +216,24 @@ class ReplicaSetClientTest < Test::Unit::TestCase
     end
   end
 
+  def test_read_pref_primary_with_tags
+    parser = Mongo::URIParser.new("mongodb://#{@rs.replicas[0].host_port},#{@rs.replicas[1].host_port}" +
+                                    "?replicaset=#{@rs.repl_set_name}&readPreference=primary&" +
+                                    "readPreferenceTags=dc:ny,rack:1")
+    assert_raise_error Mongo::MongoArgumentError do
+      parser.connection.read_pool
+    end
+  end
+
+  def test_read_pref_with_tags
+    parser = Mongo::URIParser.new("mongodb://#{@rs.replicas[0].host_port},#{@rs.replicas[1].host_port}" +
+                                    "?replicaset=#{@rs.repl_set_name}&" +
+                                    "readPreferenceTags=dc:ny,rack:1")
+    assert_raise_error Mongo::MongoArgumentError do
+      parser.connection.read_pool
+    end
+  end
+
   def test_connect_with_connection_string
     @client = MongoClient.from_uri("mongodb://#{@rs.replicas[0].host_port},#{@rs.replicas[1].host_port}?replicaset=#{@rs.repl_set_name}")
     assert !@client.nil?
@@ -343,5 +361,18 @@ class ReplicaSetClientTest < Test::Unit::TestCase
       :update => { "$set" => { :processed => true }}
     )
     assert_equal true, collection.find_one({ 'a' => id }, :read => :primary)['processed']
+  end
+
+  def test_op_timeout_option
+    client = MongoReplicaSetClient.new(@rs.repl_set_seeds, :connect => false,
+                                                           :op_timeout => nil)
+    assert_equal nil, client.op_timeout
+
+    client = MongoReplicaSetClient.new(@rs.repl_set_seeds, :connect => false,
+                                                           :op_timeout => 50)
+    assert_equal 50, client.op_timeout
+
+    client = MongoReplicaSetClient.new(@rs.repl_set_seeds, :connect => false)
+    assert_equal Mongo::MongoClient::DEFAULT_OP_TIMEOUT, client.op_timeout
   end
 end

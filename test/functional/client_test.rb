@@ -74,6 +74,27 @@ class ClientTest < Test::Unit::TestCase
     end
   end
 
+  def test_unix_sock
+    # There's an issue with unix sockets on JRuby with 32-bit libc
+    # https://jira.codehaus.org/browse/JRUBY-7183
+    return if RUBY_PLATFORM =~ /java/
+    begin
+      assert MongoClient.new("/tmp/mongodb-#{TEST_PORT}.sock")
+    rescue Errno::EAFNOSUPPORT
+      # System doesn't support UNIX sockets
+    end
+  end
+
+  def test_initialize_with_auths
+    auth = { :username  => TEST_USER,
+             :password  => TEST_USER_PWD,
+             :db_name   => TEST_DB,
+             :source    => TEST_DB}
+
+    client = MongoClient.new(:auths => Set.new([auth]))
+    assert client['test']['test'].find.to_a
+  end
+
   def test_connection_uri
     con = MongoClient.from_uri("mongodb://#{host_port}")
     assert_equal mongo_host, con.primary_pool.host
@@ -430,6 +451,19 @@ class ClientTest < Test::Unit::TestCase
     assert !conn.active?
   end
 
+  def test_operation_timeout_with_active
+    conn = MongoClient.new
+    authenticate_client(conn)
+    assert conn.active?
+    assert_equal Mongo::MongoClient::DEFAULT_OP_TIMEOUT, conn.op_timeout
+
+    pool = conn.primary_pool
+    socket = pool.instance_variable_get(:@thread_ids_to_sockets)[Thread.current.object_id]
+
+    socket.stubs(:read).raises(Mongo::OperationTimeout)
+    assert_equal false, conn.active?
+  end
+
   context "Saved authentications" do
     setup do
       @client = Mongo::MongoClient.new
@@ -485,7 +519,7 @@ class ClientTest < Test::Unit::TestCase
   context "Socket pools" do
     context "checking out writers" do
       setup do
-        @con = standard_connection(:pool_size => 10, :pool_timeout => 10)
+        @con = standard_connection(:pool_size => 10, :pool_timeout => 2)
         @coll = @con[TEST_DB]['test-connection-exceptions']
       end
 
@@ -499,13 +533,42 @@ class ClientTest < Test::Unit::TestCase
         end
       end
 
-      should "close the connection on send_message_with_gle for major exceptions" do
-        @con.stubs(:checkout_writer).raises(SystemStackError)
-        @con.stubs(:checkout_reader).raises(SystemStackError)
-        @con.expects(:close)
-        begin
-          @coll.insert({:foo => "bar"}, :w => 1)
-        rescue SystemStackError
+      context "with GLE" do
+        setup do
+          # Force this connection to use send_message_with_gle for these tests
+          @con.stubs(:use_write_command?).returns(false)
+        end
+
+        should "close the connection on send_message_with_gle for major exceptions" do
+          @con.stubs(:checkout_writer).raises(SystemStackError)
+          @con.stubs(:checkout_reader).raises(SystemStackError)
+          @con.expects(:close)
+          begin
+            @coll.insert({:foo => "bar"}, :w => 1)
+          rescue SystemStackError
+          end
+        end
+
+        should "release the connection on send_message_with_gle for connection exceptions" do
+          mock_writer = mock(:close => true)
+          mock_writer.expects(:read).raises(ConnectionFailure)
+          @con.expects(:send_message_on_socket)
+
+          @con.stubs(:checkout_writer).returns(mock_writer)
+          @con.expects(:checkin).with(mock_writer)
+          @coll.insert({:foo => "bar"}, :w => 1) rescue nil
+        end
+
+        should "release the connection on send_message_with_gle for all exceptions" do
+          mock_writer = mock()
+          mock_writer.expects(:read).raises(ArgumentError)
+          @con.expects(:send_message_on_socket)
+          @con.stubs(:checkout_writer).returns(mock_writer)
+          @con.expects(:checkin).with(mock_writer).once
+          begin
+            @coll.insert({:foo => "bar"}, :w => 1)
+          rescue ArgumentError
+          end
         end
       end
 

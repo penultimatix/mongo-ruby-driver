@@ -25,7 +25,8 @@ module Mongo
     RELEASE_2_4_AND_BEFORE = 0 # Everything before we started tracking.
     AGG_RETURNS_CURSORS    = 1 # The aggregation command may now be requested to return cursors.
     BATCH_COMMANDS         = 2 # insert, update, and delete batch command
-    MAX_WIRE_VERSION       = BATCH_COMMANDS # supported by this client implementation
+    MONGODB_3_0            = 3 # listCollections and listIndexes commands, SCRAM-SHA-1 auth mechanism
+    MAX_WIRE_VERSION       = MONGODB_3_0 # supported by this client implementation
     MIN_WIRE_VERSION       = RELEASE_2_4_AND_BEFORE # supported by this client implementation
 
     # Server command headroom
@@ -41,6 +42,7 @@ module Mongo
     DEFAULT_HOST         = 'localhost'
     DEFAULT_PORT         = 27017
     DEFAULT_DB_NAME      = 'test'
+    DEFAULT_OP_TIMEOUT   = 20
     GENERIC_OPTS         = [:auths, :logger, :connect, :db_name]
     TIMEOUT_OPTS         = [:timeout, :op_timeout, :connect_timeout]
     SSL_OPTS             = [:ssl, :ssl_key, :ssl_cert, :ssl_verify, :ssl_ca_cert, :ssl_key_pass_phrase]
@@ -125,8 +127,8 @@ module Mongo
     #  @option opts [Float] :pool_timeout (5.0) When all of the self.connections a pool are checked out,
     #    this is the number of seconds to wait for a new connection to be released before throwing an exception.
     #    Note: this setting is relevant only for multi-threaded applications.
-    #  @option opts [Float] :op_timeout (nil) The number of seconds to wait for a read operation to time out.
-    #    Disabled by default.
+    #  @option opts [Float] :op_timeout (DEFAULT_OP_TIMEOUT) The number of seconds to wait for a read operation to time out.
+    #    Set to DEFAULT_OP_TIMEOUT (20) by default. A value of nil may be specified explicitly.
     #  @option opts [Float] :connect_timeout (nil) The number of seconds to wait before timing out a
     #    connection attempt.
     #
@@ -332,26 +334,19 @@ module Mongo
     # @param password [String] password (applies to 'from' db)
     #
     # @note This command only supports the MONGODB-CR authentication mechanism.
-    def copy_database(from, to, from_host=DEFAULT_HOST, username=nil, password=nil)
-      oh = BSON::OrderedHash.new
-      oh[:copydb]   = 1
-      oh[:fromhost] = from_host
-      oh[:fromdb]   = from
-      oh[:todb]     = to
-      if username || password
-        unless username && password
-          raise MongoArgumentError,
-            'Both username and password must be supplied for authentication.'
-        end
-        nonce_cmd = BSON::OrderedHash.new
-        nonce_cmd[:copydbgetnonce] = 1
-        nonce_cmd[:fromhost] = from_host
-        result = self['admin'].command(nonce_cmd)
-        oh[:nonce] = result['nonce']
-        oh[:username] = username
-        oh[:key] = Mongo::Authentication.auth_key(username, password, oh[:nonce])
+    def copy_database(
+      from,
+      to,
+      from_host = DEFAULT_HOST,
+      username = nil,
+      password = nil,
+      mechanism = 'SCRAM-SHA-1'
+    )
+      if wire_version_feature?(MONGODB_3_0) && mechanism == 'SCRAM-SHA-1'
+        copy_db_scram(username, password, from_host, from, to)
+      else
+        copy_db_mongodb_cr(username, password, from_host, from, to)
       end
-      self['admin'].command(oh)
     end
 
     # Checks if a server is alive. This command will return immediately
@@ -446,7 +441,7 @@ module Mongo
       ping
       true
 
-      rescue ConnectionFailure
+      rescue ConnectionFailure, OperationTimeout
       false
     end
 
@@ -634,7 +629,7 @@ module Mongo
       @pool_timeout = opts.delete(:pool_timeout) || opts.delete(:timeout) || 5.0
 
       # Timeout on socket read operation.
-      @op_timeout = opts.delete(:op_timeout)
+      @op_timeout = opts.key?(:op_timeout) ? opts.delete(:op_timeout) : DEFAULT_OP_TIMEOUT
 
       # Timeout on socket connect.
       @connect_timeout = opts.delete(:connect_timeout) || 30

@@ -23,7 +23,10 @@ module BasicAuthTests
   end
 
   def teardown
-    @client[TEST_DB].authenticate(TEST_USER, TEST_USER_PWD) unless has_auth?(TEST_DB, TEST_USER)
+    return unless @client && @db
+    unless has_auth?(TEST_DB, TEST_USER)
+      @client[TEST_DB].authenticate(TEST_USER, TEST_USER_PWD)
+    end
 
     if @client.server_version < '2.5'
       @db['system.users'].remove
@@ -40,6 +43,16 @@ module BasicAuthTests
 
   def has_auth?(db_name, username)
     @client.auths.any? { |a| a[:source] == db_name && a[:username] == username }
+  end
+
+  def test_descriptive_mech_error
+    assert_raise_error Mongo::MongoArgumentError, Mongo::Authentication::MECHANISM_ERROR do
+      @db.authenticate('emily', nil, nil, nil, 'FAKE_MECHANISM')
+    end
+    assert_raise_error Mongo::MongoArgumentError, Mongo::Authentication::MECHANISM_ERROR do
+      uri = "mongodb://user:pwd@host:port/example?authSource=$external&authMechanism=FAKE_MECHANISM"
+      Mongo::MongoClient.from_uri(uri)
+    end
   end
 
   def test_add_remove_user

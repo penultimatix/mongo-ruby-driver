@@ -121,6 +121,7 @@ module Mongo
       fast_sync  = opts[:fastsync]   || false
       auth       = opts[:auth]       || true
       ipv6       = opts[:ipv6].nil? ? true : opts[:ipv6]
+      setParameter = opts[:setParameter] || 'enableTestCommands=1'
 
       params.merge(:command    => mongod,
                    :dbpath     => path,
@@ -129,7 +130,8 @@ module Mongo
                    :quiet      => quiet,
                    :fastsync   => fast_sync,
                    :auth       => auth,
-                   :ipv6       => ipv6)
+                   :ipv6       => ipv6,
+                   :setParameter => setParameter)
     end
 
     def self.key_file(opts)
@@ -301,6 +303,11 @@ module Mongo
 
       def initialize(config)
         @config = config
+        cmd = init_config!
+        super(cmd, @config[:host], @config[:port])
+      end
+
+      def init_config!
         dbpath = @config[:dbpath]
         [dbpath, File.dirname(@config[:logpath])].compact.each{|dir| FileUtils.mkdir_p(dir) unless File.directory?(dir) }
         command = @config[:command] || 'mongod'
@@ -314,7 +321,6 @@ module Mongo
           end
         end
         cmd = [command, arguments].flatten.compact
-        super(cmd, @config[:host], @config[:port])
       end
 
       def start(verifies = DEFAULT_VERIFIES)
@@ -334,8 +340,13 @@ module Mongo
             sleep 1
           end
         end
-        system "ps -fp #{@pid}; cat #{@config[:logpath]}"
-        raise Mongo::ConnectionFailure, "DbServer.start verify via connection probe failed - port:#{@port.inspect} @pid:#{@pid.inspect} kill:#{Process.kill(0, @pid).inspect} running?:#{running?.inspect} cmd:#{cmd.inspect}"
+        if @config.delete(:setParameter)
+          @cmd = init_config!
+          start(verifies)
+        else
+          system "ps -fp #{@pid}; cat #{@config[:logpath]}"
+          raise Mongo::ConnectionFailure, "DbServer.start verify via connection probe failed - port:#{@port.inspect} @pid:#{@pid.inspect} kill:#{Process.kill(0, @pid).inspect} running?:#{running?.inspect} cmd:#{cmd.inspect}"
+        end
       end
 
     end
@@ -346,7 +357,7 @@ module Mongo
         @config = config
         @servers = {}
         Mongo::Config::CLUSTER_OPT_KEYS.each do |key|
-          @servers[key] = @config[key].collect{|conf| DbServer.new(conf)} if @config[key]
+          @servers[key] = @config[key].collect{|conf| p conf; DbServer.new(conf)} if @config[key]
         end
       end
 
@@ -646,7 +657,8 @@ module Mongo
         servers.each{|server| server.start}
         # TODO - sharded replica sets - pending
         if @config[:replicas]
-          repl_set_initiate if repl_set_get_status.first['startupStatus'] == 3
+          repl_set_initiate if repl_set_get_status.first['code'] == 94 ||
+            (repl_set_get_status.first['startupStatus'] && repl_set_get_status.first['startupStatus'] == 3)
           repl_set_startup
         end
         if @config[:routers]
@@ -660,6 +672,7 @@ module Mongo
         cmd_servers = replica_set? ? [ primary ] : routers
 
         cmd_servers.each do |cmd_server|
+          next unless cmd_server
           begin
             client = Mongo::MongoClient.new(cmd_server.config[:host],
                                             cmd_server.config[:port])
@@ -678,6 +691,7 @@ module Mongo
       end
 
       def stop
+        start
         delete_users
         servers.each{|server| server.stop}
         self

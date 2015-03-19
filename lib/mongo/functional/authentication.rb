@@ -18,8 +18,11 @@ module Mongo
   module Authentication
 
     DEFAULT_MECHANISM = 'MONGODB-CR'
-    MECHANISMS        = ['GSSAPI', 'MONGODB-CR', 'MONGODB-X509', 'PLAIN']
-    EXTRA             = { 'GSSAPI' => [:gssapi_service_name, :canonicalize_host_name] }
+    MECHANISMS        = ['GSSAPI', 'MONGODB-CR', 'MONGODB-X509', 'PLAIN', 'SCRAM-SHA-1']
+    MECHANISM_ERROR   = "Must use one of #{MECHANISMS.join(', ')} " +
+                          "authentication mechanisms."
+    EXTRA             = { 'GSSAPI' => [:service_name, :canonicalize_host_name,
+                                       :service_realm] }
 
     # authentication module methods
     class << self
@@ -49,15 +52,13 @@ module Mongo
       # @raise [MongoArgumentError] if the credential set is invalid.
       # @return [Hash] The validated credential set.
       def validate_credentials(auth)
-        # set the default auth mechanism if not defined
-        auth[:mechanism] ||= DEFAULT_MECHANISM
-
         # set the default auth source if not defined
         auth[:source] = auth[:source] || auth[:db_name] || 'admin'
 
-        if (auth[:mechanism] == 'MONGODB-CR' || auth[:mechanism] == 'PLAIN') && !auth[:password]
+        if password_required?(auth[:mechanism]) && !auth[:password]
           raise MongoArgumentError,
-            "When using the authentication mechanism #{auth[:mechanism]} " +
+            "When using the authentication mechanism " +
+            "#{auth[:mechanism].nil? ? 'MONGODB-CR or SCRAM-SHA-1' : auth[:mechanism]} " +
             "both username and password are required."
         end
         # if extra opts exist, validate them
@@ -92,6 +93,19 @@ module Mongo
       def hash_password(username, password)
         Digest::MD5.hexdigest("#{username}:mongo:#{password}")
       end
+
+      private
+
+      # Does the authentication require a password?
+      #
+      # @param [ String ] mech The authentication mechanism.
+      #
+      # @return [ true, false ] If a password is required.
+      #
+      # @since 1.12.0
+      def password_required?(mech)
+        mech == 'MONGODB-CR' || mech == 'PLAIN' || mech == 'SCRAM-SHA-1' || mech.nil?
+      end
     end
 
     # Saves a cache of authentication credentials to the current
@@ -104,7 +118,7 @@ module Mongo
     # @param source [String] (nil) The authentication source database
     #   (if different than the current database).
     # @param mechanism [String] (nil) The authentication mechanism being used
-    #   (default: 'MONGODB-CR').
+    #   (default: 'MONGODB-CR' or 'SCRAM-SHA-1' if server version >= 2.7.8).
     # @param extra [Hash] (nil) A optional hash of extra options to be stored with
     #   the credential set.
     #
@@ -131,8 +145,8 @@ module Mongo
       end
 
       begin
-        socket = self.checkout_reader(:mode => :primary_preferred)
-        self.issue_authentication(auth, :socket => socket)
+        socket = checkout_reader(:mode => :primary_preferred)
+        issue_authentication(auth, :socket => socket)
       ensure
         socket.checkin if socket
       end
@@ -148,7 +162,10 @@ module Mongo
     # @return [Boolean] The result of the operation.
     def remove_auth(db_name)
       return false unless @auths
-      @auths.reject! { |a| a[:source] == db_name } ? true : false
+      auths = @auths.to_a
+      removed = auths.reject! { |a| a[:source] == db_name }
+      @auths = Set.new(auths)
+      !!removed
     end
 
     # Remove all authentication information stored in this connection.
@@ -190,6 +207,11 @@ module Mongo
     # @raise [AuthenticationError] Raised if the authentication fails.
     # @return [Boolean] Result of the authentication operation.
     def issue_authentication(auth, opts={})
+      # set the default auth mechanism if not defined
+      auth[:mechanism] ||= default_mechanism
+
+      raise MongoArgumentError,
+        MECHANISM_ERROR unless MECHANISMS.include?(auth[:mechanism])
       result = case auth[:mechanism]
         when 'MONGODB-CR'
           issue_cr(auth, opts)
@@ -199,6 +221,8 @@ module Mongo
           issue_plain(auth, opts)
         when 'GSSAPI'
           issue_gssapi(auth, opts)
+        when 'SCRAM-SHA-1'
+          issue_scram(auth, opts)
       end
 
       unless Support.ok?(result)
@@ -211,6 +235,86 @@ module Mongo
     end
 
     private
+
+    def default_mechanism
+      max_wire_version >= 3 ? 'SCRAM-SHA-1' : DEFAULT_MECHANISM
+    end
+
+    # Handles copying a database with SCRAM-SHA-1 authentication.
+    #
+    # @api private
+    #
+    # @param [ String ] username The user to authenticate on the
+    #   'from' database.
+    # @param [ String ] password The password for the user authenticated
+    #   on the 'from' database.
+    # @param [ String ] from_host The host of the 'from' database.
+    # @param [ String ] from_db Name of the database to copy from.
+    # @param [ String ] to_db Name of the database to copy to.
+    #
+    # @return [ Hash ] The result of the copydb operation.
+    #
+    # @since 1.12.0
+    def copy_db_scram(username, password, from_host, from_db, to_db)
+      auth = { :db_name   => from_db,
+               :username  => username,
+               :password  => password }
+
+      socket = checkout_reader(:mode => :primary_preferred)
+
+      copy_db = { :from_host => from_host, :from_db => from_db, :to_db => to_db }
+      scram = SCRAM.new(auth, Authentication.hash_password(username, password),
+                        { :copy_db => copy_db })
+      result = auth_command(scram.copy_db_start, socket, 'admin').first
+      result = auth_command(scram.copy_db_continue(result), socket, 'admin').first
+      until result['done']
+        result = auth_command(scram.copy_db_continue(result), socket, 'admin').first
+      end
+      socket.checkin
+      result
+    end
+
+    # Handles copying a database with MONGODB-CR authentication.
+    #
+    # @api private
+    #
+    # @param [ String ] username The user to authenticate on the
+    #   'from' database.
+    # @param [ String ] password The password for the user authenticated
+    #   on the 'from' database.
+    # @param [ String ] from_host The host of the 'from' database.
+    # @param [ String ] from_db Name of the database to copy from.
+    # @param [ String ] to_db Name of the database to copy to.
+    #
+    # @return [ Hash ] The result of the copydb operation.
+    #
+    # @since 1.12.0
+    def copy_db_mongodb_cr(username, password, from_host, from_db, to_db)
+      oh = BSON::OrderedHash.new
+      oh[:copydb]   = 1
+      oh[:fromhost] = from_host
+      oh[:fromdb]   = from_db
+      oh[:todb]     = to_db
+
+      socket = checkout_reader(:mode => :primary_preferred)
+
+      if username || password
+        unless username && password
+          raise MongoArgumentError,
+            'Both username and password must be supplied for authentication.'
+        end
+        nonce_cmd = BSON::OrderedHash.new
+        nonce_cmd[:copydbgetnonce] = 1
+        nonce_cmd[:fromhost] = from_host
+        result = auth_command(nonce_cmd, socket, 'admin').first
+        oh[:nonce] = result['nonce']
+        oh[:username] = username
+        oh[:key] = Authentication.auth_key(username, password, oh[:nonce])
+      end
+      result = auth_command(oh, socket, 'admin').first
+      socket.checkin
+      result
+    end
 
     # Handles issuing authentication commands for the MONGODB-CR auth mechanism.
     #
@@ -285,6 +389,29 @@ module Mongo
     # @private
     def issue_gssapi(auth, opts={})
       raise "In order to use Kerberos, please add the mongo-kerberos gem to your dependencies"
+    end
+
+    # Handles issuing SCRAM-SHA-1 authentication.
+    #
+    # @api private
+    #
+    # @param [ Hash ] auth The authentication credentials.
+    # @param [ Hash ] opts The options.
+    #
+    # @options opts [ Socket ] socket The Socket instance to use.
+    #
+    # @return [ Hash ] The result of the authentication operation.
+    #
+    # @since 1.12.0
+    def issue_scram(auth, opts = {})
+      db_name = auth[:source]
+      scram = SCRAM.new(auth, Authentication.hash_password(auth[:username], auth[:password]))
+      result = auth_command(scram.start, opts[:socket], db_name).first
+      result = auth_command(scram.continue(result), opts[:socket], db_name).first
+      until result['done']
+        result = auth_command(scram.finalize(result), opts[:socket], db_name).first
+      end
+      result
     end
 
     # Helper to fetch a nonce value from a given database instance.

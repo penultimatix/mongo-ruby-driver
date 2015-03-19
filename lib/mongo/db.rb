@@ -259,9 +259,14 @@ module Mongo
     #
     # @return [Array]
     def collection_names
-      names = collections_info.collect { |doc| doc['name'] || '' }
-      names = names.delete_if {|name| name.index(@name).nil? || name.index('$')}
-      names.map {|name| name.sub(@name + '.', '')}
+      if @client.wire_version_feature?(Mongo::MongoClient::MONGODB_3_0)
+        names = collections_info.collect { |doc| doc['name'] || '' }
+        names.delete_if do |name|
+          name.index('$')
+        end
+      else
+        legacy_collection_names
+      end
     end
 
     # Get an array of Collection instances, one for each collection in this database.
@@ -279,11 +284,31 @@ module Mongo
     #
     # @param [String] coll_name return info for the specified collection only.
     #
-    # @return [Mongo::Cursor]
+    # @return [Array] List of collection info.
     def collections_info(coll_name=nil)
-      selector = {}
-      selector[:name] = full_collection_name(coll_name) if coll_name
-      Cursor.new(Collection.new(SYSTEM_NAMESPACE_COLLECTION, self), :selector => selector)
+      if @client.wire_version_feature?(Mongo::MongoClient::MONGODB_3_0)
+        cmd = BSON::OrderedHash[:listCollections, 1]
+        cmd.merge!(:filter => { :name => coll_name }) if coll_name
+        result = self.command(cmd, :cursor => {})
+        if result.key?('cursor')
+          cursor_info = result['cursor']
+          pinned_pool = @client.pinned_pool
+          pinned_pool = pinned_pool[:pool] if pinned_pool.respond_to?(:keys)
+
+          seed = {
+            :cursor_id => cursor_info['id'],
+            :first_batch => cursor_info['firstBatch'],
+            :pool => pinned_pool,
+            :ns => cursor_info['ns']
+          }
+
+          Cursor.new(Collection.new('$cmd', self), seed).to_a
+        else
+          result['collections']
+        end
+      else
+        legacy_collections_info(coll_name).to_a
+      end
     end
 
     # Create a collection.
@@ -306,6 +331,9 @@ module Mongo
     # @raise [MongoDBError] raised under two conditions:
     #   either we're in +strict+ mode and the collection
     #   already exists or collection creation fails on the server.
+    #
+    # @note Note that the options listed may be subset of those available.
+    #   Please see the MongoDB documentation for a full list of supported options by server version.
     #
     # @return [Mongo::Collection]
     def create_collection(name, opts={})
@@ -480,12 +508,30 @@ module Mongo
     # @return [Hash] keys are index names and the values are lists of [key, type] pairs
     #   defining the index.
     def index_information(collection_name)
-      sel  = {:ns => full_collection_name(collection_name)}
-      info = {}
-      Cursor.new(Collection.new(SYSTEM_INDEX_COLLECTION, self), :selector => sel).each do |index|
-        info[index['name']] = index
+      if @client.wire_version_feature?(Mongo::MongoClient::MONGODB_3_0)
+        result = self.command({ :listIndexes => collection_name }, :cursor => {})
+        if result.key?('cursor')
+          cursor_info = result['cursor']
+          pinned_pool = @client.pinned_pool
+          pinned_pool = pinned_pool[:pool] if pinned_pool.respond_to?(:keys)
+
+          seed = {
+            :cursor_id => cursor_info['id'],
+            :first_batch => cursor_info['firstBatch'],
+            :pool => pinned_pool,
+            :ns => cursor_info['ns']
+          }
+
+          indexes = Cursor.new(Collection.new('$cmd', self), seed).to_a
+        else
+          indexes = result['indexes']
+        end
+      else
+        indexes = legacy_list_indexes(collection_name)
       end
-      info
+      indexes.reduce({}) do |info, index|
+        info.merge!(index['name'] => index)
+      end
     end
 
     # Return stats on this database. Uses MongoDB's dbstats command.
@@ -575,6 +621,9 @@ module Mongo
         end.join('; ')
         message << ').'
         code = result['code'] || result['assertionCode']
+        if result['writeErrors']
+          code = result['writeErrors'].first['code']
+        end
         raise ExecutionTimeout.new(message, code, result) if code == MAX_TIME_MS_CODE
         raise OperationFailure.new(message, code, result)
       end
@@ -733,6 +782,25 @@ module Mongo
         raise ex unless ex.message =~ /login/
       end
       user
+    end
+
+    def legacy_list_indexes(collection_name)
+      sel  = {:ns => full_collection_name(collection_name)}
+      Cursor.new(Collection.new(SYSTEM_INDEX_COLLECTION, self), :selector => sel)
+    end
+
+    def legacy_collections_info(coll_name=nil)
+      selector = {}
+      selector[:name] = full_collection_name(coll_name) if coll_name
+      Cursor.new(Collection.new(SYSTEM_NAMESPACE_COLLECTION, self), :selector => selector)
+    end
+
+    def legacy_collection_names
+      names = legacy_collections_info.collect { |doc| doc['name'] || '' }
+      names = names.delete_if do |name|
+        name.index(@name).nil? || name.index('$')
+      end
+      names.map {|name| name.sub(@name + '.', '')}
     end
   end
 end

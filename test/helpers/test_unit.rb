@@ -12,9 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-TEST_HOST     = ENV['MONGO_RUBY_DRIVER_HOST'] || 'localhost' unless defined? TEST_HOST
-TEST_DATA     = File.join(File.dirname(__FILE__), 'fixtures/data')
-TEST_BASE     = Test::Unit::TestCase
+TEST_HOST       = ENV['MONGO_RUBY_DRIVER_HOST'] || 'localhost' unless defined? TEST_HOST
+TEST_DATA       = File.join(File.dirname(__FILE__), 'fixtures/data')
+TEST_OP_TIMEOUT = 40
+TEST_BASE       = Test::Unit::TestCase
 
 unless defined? TEST_PORT
   TEST_PORT = if ENV['MONGO_RUBY_DRIVER_PORT']
@@ -61,7 +62,7 @@ class Test::Unit::TestCase
 
     uri = "mongodb://#{TEST_USER}:#{TEST_USER_PWD}@" +
             "#{cluster_instance.members_uri}"
-    uri += "?replicaset=#{@rs.repl_set_name}" if cluster_instance.replica_set?
+    uri += "?replicaset=#{@rs.repl_set_name}&sockettimeoutms=60000" if cluster_instance.replica_set?
     instance_variable_set("@uri", uri)
   end
 
@@ -89,16 +90,17 @@ class Test::Unit::TestCase
   #
   # @return [MongoClient] The client instance.
   def self.standard_connection(options={}, legacy=false)
+    opts = options[:op_timeout] ? options : options.merge(:op_timeout => TEST_OP_TIMEOUT)
     if legacy
       silently do
         # We have to create the Connection object directly here instead of using TEST_URI
         # because Connection#from_uri ends up creating a MongoClient object.
-        conn = Connection.new(TEST_HOST, TEST_PORT, options)
+        conn = Connection.new(TEST_HOST, TEST_PORT, opts)
         conn[TEST_DB].authenticate(TEST_USER, TEST_USER_PWD)
         conn
       end
     else
-      MongoClient.from_uri(TEST_URI, options)
+      MongoClient.from_uri(TEST_URI, opts)
     end
   end
 
@@ -147,6 +149,7 @@ class Test::Unit::TestCase
     begin
       step_down_command = BSON::OrderedHash.new
       step_down_command[:replSetStepDown] = 30
+      step_down_command[:force] = true
       member['admin'].command(step_down_command)
     rescue Mongo::OperationFailure => e
       retry unless (Time.now - start) > timeout
@@ -174,6 +177,13 @@ class Test::Unit::TestCase
 
   def new_mock_db
     Object.new
+  end
+
+  def mock_pool(tags={}, ping_time=15)
+    mock('pool').tap do |pool|
+      pool.stubs(:tags).returns(tags)
+      pool.stubs(:ping_time).returns(ping_time)
+    end
   end
 
   def assert_raise_error(klass, message=nil)
@@ -247,9 +257,15 @@ class Test::Unit::TestCase
   def with_default_journaling(client, &block)
     authenticate_client(client)
     cmd_line_args = client['admin'].command({ :getCmdLineOpts => 1 })['parsed']
-    unless client.server_version < "2.0" || cmd_line_args.include?('nojournal')
+    unless client.server_version < "2.0" || cmd_line_args.include?('nojournal') ||
+      using_heap1_storage_engine?(cmd_line_args)
       yield
     end
+  end
+
+  def using_heap1_storage_engine?(cmd_line_args)
+    cmd_line_args.include?('storage') &&
+      cmd_line_args['storage']['engine'] == 'heap1'
   end
 
   def with_no_replication(client, &block)
@@ -384,7 +400,7 @@ class Test::Unit::TestCase
         client = Mongo::MongoClient.new(TEST_HOST, TEST_PORT)
         db = client[TEST_DB]
         begin
-          db.authenticate(TEST_USER, TEST_USER_PWD)
+          db.authenticate(TEST_USER, TEST_USER_PWD, nil, 'admin')
         rescue Mongo::AuthenticationError => ex
           roles = [ 'dbAdminAnyDatabase',
                     'userAdminAnyDatabase',
@@ -406,7 +422,7 @@ class Test::Unit::TestCase
     not_cluster = TEST_BASE.class_eval { class_variables }.none? { |v| v =~ /@@cluster_/ }
 
     if @@connected_single_mongod && not_cluster
-      client = Mongo::MongoClient.from_uri(TEST_URI)
+      client = Mongo::MongoClient.from_uri(TEST_URI, :op_timeout => TEST_OP_TIMEOUT)
       db = client[TEST_DB]
       begin
         begin
