@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,15 +25,12 @@ module Mongo
       # The context gets a connection on which the operation
       # is sent in the block.
       #
-      # @params [ Mongo::Server::Context ] The context for this operation.
+      # @param [ Mongo::Server::Context ] context The context for this operation.
       #
       # @return [ Result ] The operation response, if there is one.
       #
       # @since 2.0.0
       def execute(context)
-        unless context.primary? || context.standalone? || secondary_ok?
-          raise Exception, "Must use primary server"
-        end
         context.with_connection do |connection|
           connection.dispatch([ message ])
         end
@@ -42,7 +39,7 @@ module Mongo
       # Merge this operation with another operation, returning a new one.
       # Requires that the collection and database of the two ops are the same.
       #
-      # @params[ Object ] The other operation.
+      # @param[ Object ] The other operation.
       #
       # @return [ Object ] A new operation merging this one and another.
       #
@@ -70,7 +67,7 @@ module Mongo
       # If an operation including this module doesn't define #merge!, neither
       # #merge nor #merge! will be allowed.
       #
-      # @params[ Object ] The other operation.
+      # @param[ Object ] The other operation.
       #
       # @raise [ Exception ] Merging is not supported for this operation.
       #

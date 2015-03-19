@@ -15,10 +15,255 @@ describe Mongo::Collection::View::Writable do
   end
 
   after do
-    authorized_collection.find.remove_many
+    authorized_collection.find.delete_many
   end
 
-  describe '#remove_many' do
+  describe '#find_one_and_delete' do
+
+    before do
+      authorized_collection.insert_many([{ field: 'test1' }])
+    end
+
+    context 'when a matching document is found' do
+
+      let(:selector) do
+        { field: 'test1' }
+      end
+
+      context 'when no options are provided' do
+
+        let!(:document) do
+          view.find_one_and_delete
+        end
+
+        it 'deletes the document from the database' do
+          expect(view.to_a).to be_empty
+        end
+
+        it 'returns the document' do
+          expect(document['field']).to eq('test1')
+        end
+      end
+
+      context 'when a projection is provided' do
+
+        let!(:document) do
+          view.projection(_id: 1).find_one_and_delete
+        end
+
+        it 'deletes the document from the database' do
+          expect(view.to_a).to be_empty
+        end
+
+        it 'returns the document with limited fields' do
+          expect(document['field']).to be_nil
+          expect(document['_id']).to_not be_nil
+        end
+      end
+
+      context 'when a sort is provided' do
+
+        let!(:document) do
+          view.sort(field: 1).find_one_and_delete
+        end
+
+        it 'deletes the document from the database' do
+          expect(view.to_a).to be_empty
+        end
+
+        it 'returns the document with limited fields' do
+          expect(document['field']).to eq('test1')
+        end
+      end
+    end
+
+    context 'when no matching document is found' do
+
+      let(:selector) do
+        { field: 'test5' }
+      end
+
+      let!(:document) do
+        view.find_one_and_delete
+      end
+
+      it 'returns nil' do
+        expect(document).to be_nil
+      end
+    end
+  end
+
+  describe '#find_one_and_replace' do
+
+    before do
+      authorized_collection.insert_many([{ field: 'test1', other: 'sth' }])
+    end
+
+    context 'when a matching document is found' do
+
+      let(:selector) do
+        { field: 'test1' }
+      end
+
+      context 'when no options are provided' do
+
+        let(:document) do
+          view.find_one_and_replace({ field: 'testing' })
+        end
+
+        it 'returns the original document' do
+          expect(document['field']).to eq('test1')
+        end
+      end
+
+      context 'when return_document options are provided' do
+
+        let(:document) do
+          view.find_one_and_replace({ field: 'testing' }, :return_document => :after)
+        end
+
+        it 'returns the new document' do
+          expect(document['field']).to eq('testing')
+        end
+
+        it 'replaces the document' do
+          expect(document['other']).to be_nil
+        end
+      end
+
+      context 'when a projection is provided' do
+
+        let(:document) do
+          view.projection(_id: 1).find_one_and_replace({ field: 'testing' })
+        end
+
+        it 'returns the document with limited fields' do
+          expect(document['field']).to be_nil
+          expect(document['_id']).to_not be_nil
+        end
+      end
+
+      context 'when a sort is provided' do
+
+        let(:document) do
+          view.sort(field: 1).find_one_and_replace({ field: 'testing' })
+        end
+
+        it 'returns the original document' do
+          expect(document['field']).to eq('test1')
+        end
+      end
+    end
+
+    context 'when no matching document is found' do
+
+      context 'when no upsert options are provided' do
+
+        let(:selector) do
+          { field: 'test5' }
+        end
+
+        let(:document) do
+          view.find_one_and_replace({ field: 'testing' })
+        end
+
+        it 'returns nil' do
+          expect(document).to be_nil
+        end
+      end
+
+      context 'when upsert options are provided' do
+
+        let(:selector) do
+          { field: 'test5' }
+        end
+
+        let(:document) do
+          view.find_one_and_replace({ field: 'testing' }, :upsert => true, :return_document => :after)
+        end
+
+        it 'returns the new document' do
+          expect(document['field']).to eq('testing')
+        end
+      end
+    end
+  end
+
+  describe '#find_one_and_update' do
+
+    before do
+      authorized_collection.insert_many([{ field: 'test1' }])
+    end
+
+    context 'when a matching document is found' do
+
+      let(:selector) do
+        { field: 'test1' }
+      end
+
+      context 'when no options are provided' do
+
+        let(:document) do
+          view.find_one_and_update({ '$set' => { field: 'testing' }})
+        end
+
+        it 'returns the original document' do
+          expect(document['field']).to eq('test1')
+        end
+      end
+
+      context 'when return_document options are provided' do
+
+        let(:document) do
+          view.find_one_and_update({ '$set' => { field: 'testing' }}, :return_document => :after)
+        end
+
+        it 'returns the new document' do
+          expect(document['field']).to eq('testing')
+        end
+      end
+
+      context 'when a projection is provided' do
+
+        let(:document) do
+          view.projection(_id: 1).find_one_and_update({ '$set' => { field: 'testing' }})
+        end
+
+        it 'returns the document with limited fields' do
+          expect(document['field']).to be_nil
+          expect(document['_id']).to_not be_nil
+        end
+      end
+
+      context 'when a sort is provided' do
+
+        let(:document) do
+          view.sort(field: 1).find_one_and_update({ '$set' => { field: 'testing' }})
+        end
+
+        it 'returns the original document' do
+          expect(document['field']).to eq('test1')
+        end
+      end
+    end
+
+    context 'when no matching document is found' do
+
+      let(:selector) do
+        { field: 'test5' }
+      end
+
+      let(:document) do
+        view.find_one_and_update({ '$set' => { field: 'testing' }})
+      end
+
+      it 'returns nil' do
+        expect(document).to be_nil
+      end
+    end
+  end
+
+  describe '#delete_many' do
 
     context 'when a selector was provided' do
 
@@ -31,7 +276,7 @@ describe Mongo::Collection::View::Writable do
       end
 
       let(:response) do
-        view.remove_many
+        view.delete_many
       end
 
       it 'deletes the matching documents in the collection' do
@@ -46,7 +291,7 @@ describe Mongo::Collection::View::Writable do
       end
 
       let(:response) do
-        view.remove_many
+        view.delete_many
       end
 
       it 'deletes all the documents in the collection' do
@@ -55,7 +300,7 @@ describe Mongo::Collection::View::Writable do
     end
   end
 
-  describe '#remove_one' do
+  describe '#delete_one' do
 
     context 'when a selector was provided' do
 
@@ -72,7 +317,7 @@ describe Mongo::Collection::View::Writable do
       end
 
       let(:response) do
-        view.remove_one
+        view.delete_one
       end
 
       it 'deletes the first matching document in the collection' do
@@ -87,7 +332,7 @@ describe Mongo::Collection::View::Writable do
       end
 
       let(:response) do
-        view.remove_one
+        view.delete_one
       end
 
       it 'deletes the first document in the collection' do

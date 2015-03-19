@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the 'License');
 # you may not use this file except in compliance with the License.
@@ -19,7 +19,8 @@ module Mongo
     # appropriate options on each write operation.
     #
     # @since 2.0.0
-    class Acknowledged < Mode
+    class Acknowledged
+      include Normalizable
 
       # Get the get last error command for the concern.
       #
@@ -30,7 +31,21 @@ module Mongo
       #
       # @since 2.0.0
       def get_last_error
-        @get_last_error ||= { :getlasterror => 1 }.merge(normalize(options))
+        @get_last_error ||= { GET_LAST_ERROR => 1 }.merge(
+          Options::Mapper.transform_values_to_strings(options)
+        )
+      end
+
+      # Get a human-readable string representation of an acknowledged write concern.
+      #
+      # @example Inspect the write concern.
+      #   write_concern.inspect
+      #
+      # @return [ String ] A string representation of an acknowledged write concern.
+      #
+      # @since 2.0.0
+      def inspect
+        "<Mongo::WriteConcern::Acknowledged:0x#{object_id} options=#{options}>"
       end
     end
   end

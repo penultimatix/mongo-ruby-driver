@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -42,11 +42,10 @@ module Mongo
       # @example Handle the event.
       #   server_removed.handle('127.0.0.1:27018')
       #
-      # @param [ String ] address The removed host.
+      # @param [ Address ] address The removed host.
       #
       # @since 2.0.0
       def handle(address)
-        log(:debug, 'MONGODB', [ "#{address} being removed from the cluster." ])
         cluster.remove(address)
       end
     end

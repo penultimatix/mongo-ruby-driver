@@ -78,15 +78,20 @@ describe Mongo::Operation::Command do
       it 'raises an exception' do
         expect {
           op.execute(authorized_primary.context)
-        }.to raise_error(Mongo::Operation::Write::Failure)
+        }.to raise_error(Mongo::Error::OperationFailure)
       end
     end
 
-    context 'when the command cannot run on a secondary' do
+    context 'when a document exceeds max bson size' do
 
-      context 'when the server is a secondary' do
+      let(:selector) do
+        { :ismaster => '1'*17000000 }
+      end
 
-        pending 'it re-routes to the primary'
+      it 'raises an error' do
+        expect {
+          op.execute(authorized_primary.context)
+        }.to raise_error(Mongo::Error::MaxBSONSize)
       end
     end
   end

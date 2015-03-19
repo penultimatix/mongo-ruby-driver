@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,7 +25,11 @@ module Mongo
       # @return [ Collection ] collection The indexes collection.
       attr_reader :collection
 
-      def_delegators :@collection, :cluster, :database, :server_preference
+      # @return [ Integer ] batch_size The size of the batch of results
+      #   when sending the listIndexes command.
+      attr_reader :batch_size
+
+      def_delegators :@collection, :cluster, :database, :read_preference
       def_delegators :cluster, :next_primary
 
       # The index key field.
@@ -38,25 +42,42 @@ module Mongo
       # @since 2.0.0
       NAME = 'name'.freeze
 
-      # Drop an index by its specification.
+      # The mappings of Ruby index options to server options.
       #
-      # @example Drop the index by spec.
-      #   view.drop(name: 1)
+      # @since 2.0.0
+      OPTIONS = {
+        :background => :background,
+        :bits => :bits,
+        :bucket_size => :bucketSize,
+        :default_language => :default_language,
+        :expire_after => :expireAfterSeconds,
+        :key => :key,
+        :language_override => :language_override,
+        :max => :max,
+        :min => :min,
+        :name => :name,
+        :sparse => :sparse,
+        :sphere_version => :'2dsphereIndexVersion',
+        :storage_engine => :storageEngine,
+        :text_version => :textIndexVersion,
+        :unique => :unique,
+        :version => :v,
+        :weights => :weights
+      }.freeze
+
+      # Drop an index by its name.
       #
       # @example Drop an index by its name.
-      #   view.drop('name_1')
+      #   view.drop_one('name_1')
       #
-      # @param [ Hash, String ] spec The index spec or name to drop.
+      # @param [ String ] name The name of the index.
       #
       # @return [ Result ] The response.
       #
       # @since 2.0.0
-      def drop(spec)
-        Operation::Write::DropIndex.new(
-          db_name: database.name,
-          coll_name: collection.name,
-          index_name: spec.is_a?(String) ? spec : index_name(spec)
-        ).execute(next_primary.context)
+      def drop_one(name)
+        raise Error::MultiIndexDrop.new if name == '*'
+        drop_by_name(name)
       end
 
       # Drop all indexes on the collection.
@@ -68,15 +89,15 @@ module Mongo
       #
       # @since 2.0.0
       def drop_all
-        drop('*')
+        drop_by_name('*')
       end
 
-      # Calls create_index and sets a flag not to do so again for another X minutes.
-      #  This time can be specified as an option when initializing a Mongo::DB object
-      #  as options. Any changes to an index will be propagated through regardless of
-      #  cache time (e.g., a change of index direction).
+      # Creates an index on the collection.
       #
-      # @param [ Hash ] spec A hash of field name/direction pairs.
+      # @example Create a unique index on the collection.
+      #   view.create_one({ name: 1 }, { unique: true })
+      #
+      # @param [ Hash ] keys A hash of field name/direction pairs.
       # @param [ Hash ] options Options for this index.
       #
       # @option options [ true, false ] :unique (false) If true, this index will enforce
@@ -94,16 +115,38 @@ module Mongo
       # @option options [ Integer ] :min (nil) Specify the min latitude and longitude for
       #   a geo index.
       #
+      # @note Note that the options listed may be subset of those available.
+      # See the MongoDB documentation for a full list of supported options by server version.
+      #
       # @return [ Result ] The response.
       #
       # @since 2.0.0
-      def ensure(spec, options = {})
-        Operation::Write::EnsureIndex.new(
-          index: spec,
+      def create_one(keys, options = {})
+        create_many({ key: keys }.merge(options))
+      end
+
+      # Creates multiple indexes on the collection.
+      #
+      # @example Create multiple indexes.
+      #   view.create_many([
+      #     { key: { name: 1 }, unique: true },
+      #     { key: { age: -1 }, background: true }
+      #   ])
+      #
+      # @note On MongoDB 3.0.0 and higher, the indexes will be created in
+      #   parallel on the server.
+      #
+      # @param [ Array<Hash> ] models The index specifications. Each model MUST
+      #   include a :key option.
+      #
+      # @return [ Result ] The result of the command.
+      #
+      # @since 2.0.0
+      def create_many(*models)
+        Operation::Write::CreateIndex.new(
+          indexes: normalize_models(models.flatten),
           db_name: database.name,
           coll_name: collection.name,
-          index_name: options[:name] || index_name(spec),
-          options: options
         ).execute(next_primary.context)
       end
 
@@ -113,17 +156,17 @@ module Mongo
       # @example Get index information by name.
       #   view.get('name_1')
       #
-      # @example Get index information by spec.
+      # @example Get index information by the keys.
       #   view.get(name: 1)
       #
-      # @param [ Hash, String ] spec The index name or spec.
+      # @param [ Hash, String ] keys_or_name The index name or spec.
       #
       # @return [ Hash ] The index information.
       #
       # @since 2.0.0
-      def get(spec)
+      def get(keys_or_name)
         find do |index|
-          (index[NAME] == spec) || (index[KEY] == normalize_keys(spec))
+          (index[NAME] == keys_or_name) || (index[KEY] == normalize_keys(keys_or_name))
         end
       end
 
@@ -136,11 +179,12 @@ module Mongo
       #
       # @since 2.0.0
       def each(&block)
-        server = server_preference.select_servers(cluster.servers).first
-        Operation::Read::Indexes.new(
-          db_name: database.name,
-          coll_name: collection.name
-        ).execute(server.context).documents.each(&block)
+        server = next_primary
+        cursor = Cursor.new(self, send_initial_query(server), server).to_enum
+        cursor.each do |doc|
+          yield doc
+        end if block_given?
+        cursor
       end
 
       # Create the new index view.
@@ -149,23 +193,67 @@ module Mongo
       #   View::Index.new(collection)
       #
       # @param [ Collection ] collection The collection.
+      # @param [ Hash ] options Options for getting a list of indexes.
+      #   Only relevant for when the listIndexes command is used with server
+      #   versions >=2.8.
+      #
+      # @option options [ Integer ] :batch_size The batch size for results
+      #   returned from the listIndexes command.
       #
       # @since 2.0.0
-      def initialize(collection)
+      def initialize(collection, options = {})
         @collection = collection
+        @batch_size = options[:batch_size]
       end
 
       private
+
+      def drop_by_name(name)
+        Operation::Write::DropIndex.new(
+          db_name: database.name,
+          coll_name: collection.name,
+          index_name: name
+        ).execute(next_primary.context)
+      end
 
       def index_name(spec)
         spec.to_a.join('_')
       end
 
+      def indexes_spec
+        { selector: {
+            listIndexes: collection.name,
+            cursor: batch_size ? { batchSize: batch_size } : {} },
+          coll_name: collection.name,
+          db_name: database.name }
+      end
+
+      def initial_query_op
+        Operation::Read::Indexes.new(indexes_spec)
+      end
+
+      def limit; -1; end
+
       def normalize_keys(spec)
         return false if spec.is_a?(String)
-        spec.reduce({}) do |normalized, (key, value)|
-          normalized[key.to_s] = value
-          normalized
+        Options::Mapper.transform_keys_to_strings(spec)
+      end
+
+      def normalize_models(models)
+        with_generated_names(models).map do |model|
+          Options::Mapper.transform(model, OPTIONS)
+        end
+      end
+
+      def send_initial_query(server)
+        initial_query_op.execute(server.context)
+      end
+
+      def with_generated_names(models)
+        models.dup.each do |model|
+          unless model[:name]
+            model[:name] = index_name(model[:key])
+          end
         end
       end
     end

@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -102,13 +102,19 @@ module Mongo
         # @example Validate the result.
         #   result.validate!
         #
-        # @raise [ Write::Failure ] If an error is in the result.
+        # @raise [ Error::OperationFailure ] If an error is in the result.
         #
         # @return [ Result ] The result if verification passed.
         #
         # @since 2.0.0
         def validate!
-          documents.nil? ? raise(Write::Failure.new(reply.documents[0])) : self
+          documents.nil? ? raise(Error::OperationFailure.new(parser.message)) : self
+        end
+
+        private
+
+        def first_document
+          @first_document ||= reply.documents[0]
         end
       end
     end

@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 require 'mongo/auth/executable'
 require 'mongo/auth/cr'
 require 'mongo/auth/ldap'
-require 'mongo/auth/kerberos' if BSON::Environment.jruby?
+require 'mongo/auth/scram'
 require 'mongo/auth/user'
 require 'mongo/auth/x509'
 require 'mongo/auth/roles'
@@ -50,23 +50,15 @@ module Mongo
       mongodb_cr: CR,
       mongodb_x509: X509,
       plain: LDAP,
+      scram: SCRAM
     }
-
-    # We support Kerberos authentication in JRuby only.
-    #
-    # @since 2.0.0
-    if BSON::Environment.jruby?
-      SOURCES[:gssapi] = Kerberos
-    end
-
-    SOURCES.freeze
 
     # Get the authorization strategy for the provided auth mechanism.
     #
     # @example Get the strategy.
-    #   Auth.get(:mongodb_cr)
+    #   Auth.get(user)
     #
-    # @param [ Symbol ] mechanism The authorization mechanism.
+    # @param [ Auth::User ] user The user object.
     #
     # @return [ CR, X509, LDAP, Kerberos ] The auth strategy.
     #

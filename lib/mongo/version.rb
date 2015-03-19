@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,5 +14,8 @@
 
 module Mongo
 
-  VERSION = '2.0.0.alpha'
+  # The current version of the driver.
+  #
+  # @since 2.0.0
+  VERSION = '2.0.0.rc'.freeze
 end

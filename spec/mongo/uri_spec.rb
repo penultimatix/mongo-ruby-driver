@@ -8,7 +8,7 @@ describe Mongo::URI do
     context 'string is not uri' do
       let(:string) { 'tyler' }
       it 'raises an error' do
-        expect { uri }.to raise_error(Mongo::URI::BadURI)
+        expect { uri }.to raise_error(Mongo::URI::Invalid)
       end
     end
   end
@@ -256,7 +256,7 @@ describe Mongo::URI do
         end
 
         let(:read) do
-          { :tags => [{ :dc => 'ny', :rack => '1' }] }
+          { :tag_sets => [{ :dc => 'ny', :rack => '1' }] }
         end
 
         it 'sets the read preference tag set' do
@@ -270,7 +270,7 @@ describe Mongo::URI do
         end
 
         let(:read) do
-          { :tags => [{ :dc => 'ny' }, { :dc => 'bos' }] }
+          { :tag_sets => [{ :dc => 'ny' }, { :dc => 'bos' }] }
         end
 
         it 'sets the read preference tag sets' do
@@ -341,21 +341,137 @@ describe Mongo::URI do
       end
     end
 
+    context 'auth mechanism properties provided' do
+
+      context 'service_name' do
+        let(:options) do
+          "authMechanismProperties=SERVICE_NAME:#{service_name}"
+        end
+
+        let(:service_name) { 'foo' }
+        let(:auth) do
+          { auth_mech_properties: { service_name: service_name } }
+        end
+
+        it 'sets the auth mechanism properties' do
+          expect(uri.options[:auth]).to eq(auth)
+        end
+      end
+
+      context 'canonicalize_host_name' do
+        let(:options) do
+          "authMechanismProperties=CANONICALIZE_HOST_NAME:#{canonicalize_host_name}"
+        end
+
+        let(:canonicalize_host_name) { 'true' }
+        let(:auth) do
+          { auth_mech_properties: { canonicalize_host_name: true } }
+        end
+
+        it 'sets the auth mechanism properties' do
+          expect(uri.options[:auth]).to eq(auth)
+        end
+      end
+
+      context 'service_realm' do
+        let(:options) do
+          "authMechanismProperties=SERVICE_REALM:#{service_realm}"
+        end
+
+        let(:service_realm) { 'dumdum' }
+        let(:auth) do
+          { auth_mech_properties: { service_realm: service_realm } }
+        end
+
+        it 'sets the auth mechanism properties' do
+          expect(uri.options[:auth]).to eq(auth)
+        end
+      end
+
+      context 'multiple properties' do
+        let(:options) do
+          "authMechanismProperties=SERVICE_REALM:#{service_realm}," +
+            "CANONICALIZE_HOST_NAME:#{canonicalize_host_name}," +
+            "SERVICE_NAME:#{service_name}"
+        end
+
+        let(:service_name) { 'foo' }
+        let(:canonicalize_host_name) { 'true' }
+        let(:service_realm) { 'dumdum' }
+
+        let(:auth) do
+          { auth_mech_properties: { service_name: service_name,
+                                    canonicalize_host_name: true,
+                                    service_realm: service_realm } }
+        end
+
+        it 'sets the auth mechanism properties' do
+          expect(uri.options[:auth]).to eq(auth)
+        end
+      end
+    end
+
     context 'connectTimeoutMS' do
-      let(:timeout) { 4567 }
-      let(:options) { "connectTimeoutMS=#{timeout}" }
+      let(:options) { "connectTimeoutMS=4567" }
 
       it 'sets the the connect timeout' do
-        expect(uri.options[:connect_timeout]).to eq(timeout)
+        expect(uri.options[:connect_timeout]).to eq(4.567)
       end
     end
 
     context 'socketTimeoutMS' do
-      let(:timeout) { 8910 }
-      let(:options) { "socketTimeoutMS=#{timeout}" }
+      let(:options) { "socketTimeoutMS=8910" }
 
       it 'sets the socket timeout' do
-        expect(uri.options[:socket_timeout]).to eq(timeout)
+        expect(uri.options[:socket_timeout]).to eq(8.910)
+      end
+    end
+
+    context 'when providing serverSelectionTimeoutMS' do
+
+      let(:options) { "serverSelectionTimeoutMS=3561" }
+
+      it 'sets the the connect timeout' do
+        expect(uri.options[:server_selection_timeout]).to eq(3.561)
+      end
+    end
+
+    context 'when providing localThresholdMS' do
+
+      let(:options) { "localThresholdMS=3561" }
+
+      it 'sets the the connect timeout' do
+        expect(uri.options[:local_threshold]).to eq(3.561)
+      end
+    end
+
+    context 'when providing maxPoolSize' do
+
+      let(:max_pool_size) { 10 }
+      let(:options) { "maxPoolSize=#{max_pool_size}" }
+
+      it 'sets the max pool size option' do
+        expect(uri.options[:max_pool_size]).to eq(max_pool_size)
+      end
+    end
+
+    context 'when providing minPoolSize' do
+
+      let(:min_pool_size) { 5 }
+      let(:options) { "minPoolSize=#{min_pool_size}" }
+
+      it 'sets the min pool size option' do
+        expect(uri.options[:min_pool_size]).to eq(min_pool_size)
+      end
+    end
+
+    context 'when providing waitQueueTimeoutMS' do
+
+      let(:wait_queue_timeout) { 500 }
+      let(:options) { "waitQueueTimeoutMS=#{wait_queue_timeout}" }
+
+      it 'sets the wait queue timeout option' do
+        expect(uri.options[:wait_queue_timeout]).to eq(0.5)
       end
     end
 
@@ -384,6 +500,17 @@ describe Mongo::URI do
 
       it 'do not overshadow top level options' do
         expect(uri.options).not_to be_empty
+      end
+    end
+
+    context 'when an invalid option is provided' do
+
+      let(:options) { 'iDontKnow=10' }
+
+      it 'raises an exception' do
+        expect {
+          uri.options
+        }.to raise_error(Mongo::URI::InvalidOption)
       end
     end
   end

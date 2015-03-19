@@ -76,24 +76,17 @@ describe Mongo::Operation::Write::Command::Delete do
 
     context 'server' do
 
-      context 'when the type is secondary' do
-
-        it 'throws an error' do
-          expect{ op.execute(secondary_context) }.to raise_exception
-        end
-      end
-
       context 'message' do
         let(:expected_selector) do
           { :deletes       => deletes,
             :delete        => coll_name,
-            :write_concern => write_concern.options,
+            :writeConcern => write_concern.options,
             :ordered       => true
           }
         end
 
         it 'creates a query wire protocol message with correct specs' do
-          allow_any_instance_of(Mongo::ServerPreference::Primary).to receive(:server) do
+          allow_any_instance_of(Mongo::ServerSelector::Primary).to receive(:server) do
             primary_server
           end
 
@@ -103,19 +96,6 @@ describe Mongo::Operation::Write::Command::Delete do
             expect(sel).to eq(expected_selector)
           end
           op.execute(primary_context)
-        end
-      end
-
-      context 'write concern' do
-
-        context 'w == 0' do
-
-          pending 'no response is returned'
-        end
-
-        context 'w > 0' do
-
-          pending 'returns a response'
         end
       end
     end

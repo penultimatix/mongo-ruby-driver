@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -45,22 +45,26 @@ module Mongo
       include Executable
       include Specifiable
       include Limited
+      include ReadPreferrable
+
+      # The error message for needing a primary.
+      #
+      # @since 2.0.
+      ERROR_MESSAGE = "If 'out' is specified as a collection, the primary server must be used.".freeze
 
       # Execute the map/reduce operation.
       #
       # @example Execute the operation.
       #   operation.execute(context)
       #
-      # @params [ Mongo::Server::Context ] The context for this operation.
+      # @param [ Server::Context ] context The context for this operation.
       #
       # @return [ Result ] The operation response, if there is one.
       #
       # @since 2.0.0
       def execute(context)
-        # @todo: Should we respect tag sets and options here?
-        if context.secondary? && !secondary_ok?
-          warn "Database command '#{selector.keys.first}' rerouted to primary server"
-          context = Mongo::ServerPreference.get(:mode => :primary).server.context
+        unless context.standalone? || context.mongos? || context.primary? || secondary_ok?
+          raise Error::NeedPrimaryServer.new(ERROR_MESSAGE)
         end
         execute_message(context)
       end
@@ -69,7 +73,7 @@ module Mongo
 
       def execute_message(context)
         context.with_connection do |connection|
-          Result.new(connection.dispatch([ message ])).validate!
+          Result.new(connection.dispatch([ message(context) ])).validate!
         end
       end
 
@@ -84,8 +88,8 @@ module Mongo
         selector[:out] == 'inline'
       end
 
-      def message
-        Protocol::Query.new(db_name, Database::COMMAND, selector, options)
+      def query_coll
+        Database::COMMAND
       end
     end
   end

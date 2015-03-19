@@ -8,7 +8,7 @@ Gem::Specification.new do |s|
   s.version           = Mongo::VERSION
   s.platform          = Gem::Platform::RUBY
 
-  s.authors           = ['Tyler Brock', 'Gary Murakami', 'Emily Stolfo', 'Brandon Black', 'Durran Jordan']
+  s.authors           = ['Tyler Brock', 'Emily Stolfo', 'Durran Jordan']
   s.email             = 'mongodb-dev@googlegroups.com'
   s.homepage          = 'http://www.mongodb.org'
   s.summary           = 'Ruby driver for MongoDB'
@@ -30,5 +30,5 @@ Gem::Specification.new do |s|
   s.has_rdoc          = 'yard'
   s.bindir            = 'bin'
 
-  s.add_dependency 'bson', '~> 2.2'
+  s.add_dependency 'bson', '~> 3.0'
 end

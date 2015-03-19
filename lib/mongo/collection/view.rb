@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -53,7 +53,7 @@ module Mongo
       attr_reader :selector
 
       # Delegate necessary operations to the collection.
-      def_delegators :collection, :client, :cluster, :database, :server_preference, :write_concern
+      def_delegators :collection, :client, :cluster, :database, :read_preference, :write_concern
 
       # Delegate to the cluster for the next primary.
       def_delegators :cluster, :next_primary

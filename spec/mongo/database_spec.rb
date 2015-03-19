@@ -60,7 +60,7 @@ describe Mongo::Database do
       it 'raises an error' do
         expect do
           database[nil]
-        end.to raise_error(Mongo::Collection::InvalidName)
+        end.to raise_error(Mongo::Error::InvalidCollectionName)
       end
     end
   end
@@ -86,36 +86,66 @@ describe Mongo::Database do
     it 'does not include system collections' do
       expect(database.collection_names).to_not include('system.indexes')
     end
+
+    context 'when specifying a batch size' do
+
+      it 'returns the stripped names of the collections' do
+        expect(database.collection_names(batch_size: 1).to_a).to include('users')
+      end
+    end
   end
 
   describe '#collections' do
 
-    let(:database) do
-      described_class.new(authorized_client, TEST_DB)
+    context 'when the database exists' do
+
+      let(:database) do
+        described_class.new(authorized_client, TEST_DB)
+      end
+
+      let(:collection) do
+        Mongo::Collection.new(database, 'users')
+      end
+
+      before do
+        database[:users].create
+      end
+
+      after do
+        database[:users].drop
+      end
+
+      it 'returns collection objects for each name' do
+        expect(database.collections).to include(collection)
+      end
     end
 
-    let(:collection) do
-      Mongo::Collection.new(database, 'users')
+    context 'when the database does not exist' do
+
+      let(:database) do
+        described_class.new(authorized_client, 'invalid_database')
+      end
+
+      it 'returns an empty list', if: write_command_enabled? do
+        expect(database.collections).to be_empty
+      end
     end
 
-    before do
-      database[:users].create
-    end
+    context 'when the user is not authorized', unless: sharded? do
 
-    after do
-      database[:users].drop
-    end
+      let(:database) do
+        described_class.new(unauthorized_client, TEST_DB)
+      end
 
-    it 'returns collection objects for each name' do
-      expect(database.collections).to include(collection)
+      it 'raises an exception' do
+        expect {
+          database.collections
+        }.to raise_error(Mongo::Error::OperationFailure)
+      end
     end
   end
 
   describe '#command' do
-
-    let(:client) do
-      Mongo::Client.new([ '127.0.0.1:27017' ], database: TEST_DB)
-    end
 
     let(:database) do
       described_class.new(authorized_client, TEST_DB)
@@ -123,6 +153,31 @@ describe Mongo::Database do
 
     it 'sends the query command to the cluster' do
       expect(database.command(:ismaster => 1).written_count).to eq(0)
+    end
+
+    context 'when an alternate read preference is specified' do
+
+      before do
+        allow(database.cluster).to receive(:standalone?).and_return(false)
+      end
+
+      let(:read) do
+        { :mode => :secondary, :tag_sets => [{ 'non' => 'existent' }] }
+      end
+
+      let(:client) do
+        authorized_client.with(server_selection_timeout: 2)
+      end
+
+      let(:database) do
+        described_class.new(client, TEST_DB, client.options)
+      end
+
+      it 'uses that read preference', unless: sharded? do
+        expect do
+          database.command({ ping: 1 }, { read: read })
+        end.to raise_error(Mongo::ServerSelector::NoServerAvailable)
+      end
     end
   end
 
@@ -139,7 +194,7 @@ describe Mongo::Database do
     it 'raises an exception', unless: write_command_enabled? do
       expect {
         database.drop
-      }.to raise_error(Mongo::Operation::Write::Failure)
+      }.to raise_error(Mongo::Error::OperationFailure)
     end
   end
 
@@ -165,8 +220,83 @@ describe Mongo::Database do
       it 'raises an error' do
         expect do
           described_class.new(authorized_client, nil)
-        end.to raise_error(Mongo::Database::InvalidName)
+        end.to raise_error(Mongo::Error::InvalidDatabaseName)
       end
+    end
+  end
+
+  describe '#inspect' do
+
+    let(:database) do
+      described_class.new(authorized_client, TEST_DB)
+    end
+
+    it 'includes the object id' do
+      expect(database.inspect).to include(database.object_id.to_s)
+    end
+
+    it 'includes the name' do
+      expect(database.inspect).to include(database.name)
+    end
+  end
+
+  describe '#fs' do
+
+    let(:database) do
+      described_class.new(authorized_client, TEST_DB)
+    end
+
+    shared_context 'a GridFS database' do
+
+      it 'returns a Grid::FS for the db' do
+        expect(fs).to be_a(Mongo::Grid::FS)
+      end
+
+      context 'when operating on the fs' do
+
+        let(:file) do
+          Mongo::Grid::File.new('Hello!', :filename => 'test.txt')
+        end
+
+        before do
+          fs.insert_one(file)
+        end
+
+        after do
+          fs.files_collection.find.delete_many
+          fs.chunks_collection.find.delete_many
+        end
+
+        let(:from_db) do
+          fs.find_one(:filename => 'test.txt')
+        end
+
+        it 'returns the assembled file from the db' do
+          expect(from_db.filename).to eq(file.metadata.filename)
+        end
+      end
+    end
+
+    context  'when no options are provided' do
+
+      let(:fs) do
+        database.fs
+      end
+
+      it_behaves_like 'a GridFS database'
+    end
+
+    context 'when a custom prefix is provided' do
+
+      let(:fs) do
+        database.fs(:fs_name => 'grid')
+      end
+
+      it 'sets the custom prefix' do
+        expect(fs.prefix).to eq('grid')
+      end
+
+      it_behaves_like 'a GridFS database'
     end
   end
 end

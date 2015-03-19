@@ -1,4 +1,4 @@
-# Copyright (C) 2009 - 2014 MongoDB Inc.
+# Copyright (C) 2014-2015 MongoDB Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,6 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+require 'mongo/auth/cr/conversation'
 
 module Mongo
   module Auth
@@ -32,36 +34,10 @@ module Mongo
       #
       # @since 2.0.0
       def login(connection)
-        nonce = connection.dispatch([ nonce_message(connection) ]).documents[0]
-        reply = connection.dispatch([ login_message(connection, nonce[Auth::NONCE]) ])
-        raise Unauthorized.new(user) if reply.documents[0]['ok'] == 0
-        reply
-      end
-
-      private
-
-      # On 2.6 and higher, nonce messages must always go to the admin database,
-      # where on 2.4 and lower they go to the database the user is authorized
-      # for.
-      def nonce_message(connection)
-        Protocol::Query.new(
-          auth_database(connection),
-          Database::COMMAND,
-          Auth::GET_NONCE,
-          limit: -1
-        )
-      end
-
-      # On 2.6 and higher, login messages must always go to the admin database,
-      # where on 2.4 and lower they go to the database the user is authorized
-      # for.
-      def login_message(connection, nonce)
-        Protocol::Query.new(
-          auth_database(connection),
-          Database::COMMAND,
-          { authenticate: 1, user: user.name, nonce: nonce, key: user.auth_key(nonce) },
-          limit: -1
-        )
+        conversation = Conversation.new(user, auth_database(connection))
+        reply = connection.dispatch([ conversation.start ])
+        reply = connection.dispatch([ conversation.continue(reply) ])
+        conversation.finalize(reply)
       end
     end
   end

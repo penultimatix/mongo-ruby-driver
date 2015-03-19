@@ -13,7 +13,7 @@ describe Mongo::Operation::Write::Update do
     { :update        => document,
       :db_name       => TEST_DB,
       :coll_name     => TEST_COLL,
-      :write_concern => Mongo::WriteConcern::Mode.get(:w => 1),
+      :write_concern => Mongo::WriteConcern.get(:w => 1),
       :ordered       => true
     }
   end
@@ -54,7 +54,7 @@ describe Mongo::Operation::Write::Update do
           { :update        => other_doc,
             :db_name       => TEST_DB,
             :coll_name     => TEST_COLL,
-            :write_concern => Mongo::WriteConcern::Mode.get(:w => 1),
+            :write_concern => Mongo::WriteConcern.get(:w => 1),
             :ordered       => true
           }
         end
@@ -78,7 +78,7 @@ describe Mongo::Operation::Write::Update do
     end
 
     after do
-      authorized_collection.find.remove_many
+      authorized_collection.find.delete_many
     end
 
     context 'when updating a single document' do
@@ -88,7 +88,7 @@ describe Mongo::Operation::Write::Update do
           update: document,
           db_name: TEST_DB,
           coll_name: TEST_COLL,
-          write_concern: Mongo::WriteConcern::Mode.get(:w => 1)
+          write_concern: Mongo::WriteConcern.get(:w => 1)
         })
       end
 
@@ -116,7 +116,7 @@ describe Mongo::Operation::Write::Update do
         it 'raises an exception' do
           expect {
             update.execute(authorized_primary.context)
-          }.to raise_error(Mongo::Operation::Write::Failure)
+          }.to raise_error(Mongo::Error::OperationFailure)
         end
       end
     end
@@ -128,7 +128,7 @@ describe Mongo::Operation::Write::Update do
           update: document,
           db_name: TEST_DB,
           coll_name: TEST_COLL,
-          write_concern: Mongo::WriteConcern::Mode.get(:w => 1)
+          write_concern: Mongo::WriteConcern.get(:w => 1)
         })
       end
 
@@ -156,14 +156,22 @@ describe Mongo::Operation::Write::Update do
         it 'raises an exception' do
           expect {
             update.execute(authorized_primary.context)
-          }.to raise_error(Mongo::Operation::Write::Failure)
+          }.to raise_error(Mongo::Error::OperationFailure)
         end
       end
-    end
 
-    context 'when the server is a secondary' do
+      context 'when a document exceeds max bson size' do
 
-      pending 'it raises an exception'
+        let(:document) do
+          { q: { name: 't'*17000000}, u: { '$set' => { field: 'blah' } } }
+        end
+
+        it 'raises an error' do
+          expect {
+            update.execute(authorized_primary.context)
+          }.to raise_error(Mongo::Error::MaxBSONSize)
+        end
+      end
     end
   end
 end

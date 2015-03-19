@@ -262,7 +262,7 @@ describe Mongo::Collection do
       end
 
       after do
-        authorized_collection.find.remove_many
+        authorized_collection.find.delete_many
       end
 
       let(:view) do
@@ -279,16 +279,12 @@ describe Mongo::Collection do
 
   describe '#insert_many' do
 
-    let(:collection) do
-      authorized_collection
-    end
-
     after do
-      authorized_collection.find.remove_many
+      authorized_collection.find.delete_many
     end
 
     let(:result) do
-      collection.insert_many([{ name: 'test1' }, { name: 'test2' }])
+      authorized_collection.insert_many([{ name: 'test1' }, { name: 'test2' }])
     end
 
     it 'inserts the documents into the collection', if: write_command_enabled? do
@@ -302,16 +298,12 @@ describe Mongo::Collection do
 
   describe '#insert_one' do
 
-    let(:collection) do
-      authorized_collection
-    end
-
     after do
-      authorized_collection.find.remove_many
+      authorized_collection.find.delete_many
     end
 
     let(:result) do
-      collection.insert_one({ name: 'testing' })
+      authorized_collection.insert_one({ name: 'testing' })
     end
 
     it 'inserts the document into the collection', if: write_command_enabled? do
@@ -320,6 +312,51 @@ describe Mongo::Collection do
 
     it 'inserts the document into the collection', unless: write_command_enabled? do
       expect(result.written_count).to eq(0)
+    end
+  end
+
+  describe '#inspect' do
+
+    it 'includes the object id' do
+      expect(authorized_collection.inspect).to include(authorized_collection.object_id.to_s)
+    end
+
+    it 'includes the namespace' do
+      expect(authorized_collection.inspect).to include(authorized_collection.namespace)
+    end
+  end
+
+  describe '#indexes' do
+
+    let(:index_spec) do
+      { name: 1 }
+    end
+
+    let(:batch_size) { nil }
+
+    let(:index_names) do
+      authorized_collection.indexes(batch_size: batch_size).collect { |i| i['name'] }
+    end
+
+    before do
+      authorized_collection.indexes.create_one(index_spec, unique: true)
+    end
+
+    after do
+      authorized_collection.indexes.drop_one('name_1')
+    end
+
+    it 'returns a list of indexes' do
+      expect(index_names).to include(*'name_1', '_id_')
+    end
+
+    context 'when batch size is specified' do
+
+      let(:batch_size) { 1 }
+
+      it 'returns a list of indexes' do
+        expect(index_names).to include(*'name_1', '_id_')
+      end
     end
   end
 end

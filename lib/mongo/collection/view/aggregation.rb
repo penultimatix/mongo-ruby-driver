@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -94,7 +94,13 @@ module Mongo
         end
 
         def send_initial_query(server)
-          initial_query_op.execute(server.context)
+          begin
+            initial_query_op.execute(server.context)
+          rescue Mongo::Error::NeedPrimaryServer
+            warn 'Rerouting the Aggregation operation to the primary server.'
+            server = ServerSelector.get(mode: :primary).select_server(cluster)
+            initial_query_op.execute(server.context)
+          end
         end
       end
     end

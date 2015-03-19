@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -35,7 +35,7 @@ module Mongo
         #
         # @yieldparam [ Hash ] Each matching document.
         def each
-          server = read.select_servers(cluster.servers).first
+          server = read.select_server(cluster)
           cursor = Cursor.new(view, send_initial_query(server), server).to_enum
           cursor.each do |doc|
             yield doc

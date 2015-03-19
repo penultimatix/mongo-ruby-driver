@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,24 +14,27 @@
 
 require 'forwardable'
 require 'bson'
+require 'openssl'
 require 'mongo/loggable'
 require 'mongo/logger'
-require 'mongo/errors'
+require 'mongo/error'
 require 'mongo/event'
+require 'mongo/address'
 require 'mongo/auth'
+require 'mongo/bulk_write'
 require 'mongo/client'
 require 'mongo/cluster'
 require 'mongo/collection'
-require 'mongo/connection'
 require 'mongo/cursor'
 require 'mongo/database'
 require 'mongo/grid'
 require 'mongo/index'
 require 'mongo/operation'
-require 'mongo/pool'
+require 'mongo/options'
 require 'mongo/protocol'
 require 'mongo/server'
-require 'mongo/server_preference'
+require 'mongo/server_selector'
 require 'mongo/socket'
 require 'mongo/uri'
 require 'mongo/version'
+require 'mongo/write_concern'

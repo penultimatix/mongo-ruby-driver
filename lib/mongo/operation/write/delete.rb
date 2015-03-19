@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ module Mongo
       #   the delete should be executed.
       # @option spec :coll_name [ String ] The name of the collection on which
       #   the delete should be executed.
-      # @option spec :write_concern [ Mongo::WriteConcern::Mode ] The write concern
+      # @option spec :write_concern [ Mongo::WriteConcern ] The write concern
       #   for this operation.
       # @option spec :ordered [ true, false ] Whether the operations should be
       #   executed in order.
@@ -53,13 +53,13 @@ module Mongo
         # @example Execute the operation.
         #   operation.execute(context)
         #
-        # @params [ Mongo::Server::Context ] The context for this operation.
+        # @param [ Mongo::Server::Context ] context The context for this operation.
         #
         # @return [ Result ] The result.
         #
         # @since 2.0.0
         def execute(context)
-          if context.write_command_enabled?
+          if context.features.write_command_enabled?
             execute_write_command(context)
           else
             execute_message(context)
@@ -69,7 +69,9 @@ module Mongo
         private
 
         def execute_write_command(context)
-          Result.new(Command::Delete.new(spec.merge(:deletes => [ delete ])).execute(context)).validate!
+          s = spec.merge(:deletes => [ delete ])
+          s.delete(:delete)
+          Result.new(Command::Delete.new(s).execute(context)).validate!
         end
 
         def execute_message(context)

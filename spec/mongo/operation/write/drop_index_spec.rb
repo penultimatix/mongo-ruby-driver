@@ -11,7 +11,7 @@ describe Mongo::Operation::Write::DropIndex do
       end
 
       before do
-        authorized_collection.indexes.ensure(spec, unique: true)
+        authorized_collection.indexes.create_one(spec, unique: true)
       end
 
       let(:operation) do
@@ -44,7 +44,7 @@ describe Mongo::Operation::Write::DropIndex do
       it 'raises an exception' do
         expect {
           operation.execute(authorized_primary.context)
-        }.to raise_error(Mongo::Operation::Write::Failure)
+        }.to raise_error(Mongo::Error::OperationFailure)
       end
     end
   end

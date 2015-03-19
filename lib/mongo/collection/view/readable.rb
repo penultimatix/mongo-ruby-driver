@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -53,6 +53,18 @@ module Mongo
           Aggregation.new(self, pipeline, options)
         end
 
+        # Allows the query to get partial results if some shards are down.
+        #
+        # @example Allow partial results.
+        #   view.allow_partial_results
+        #
+        # @return [ View ] The new view.
+        #
+        # @since 2.0.0
+        def allow_partial_results
+          configure_flag(:partial)
+        end
+
         # The number of documents returned in each batch of results from MongoDB.
         #
         # @example Set the batch size.
@@ -93,15 +105,23 @@ module Mongo
         # @example Get the number of documents in the collection.
         #   collection_view.count
         #
+        # @param [ Hash ] options Options for the count command.
+        #
+        # @option options :skip [ Integer ] The number of documents to skip.
+        # @option options :hint [ Hash ] Override default index selection and force
+        #   MongoDB to use a specific index for the query.
+        # @option options :limit [ Integer ] Max number of docs to return.
+        # @option options :read [ Hash ] The read preference for this command.
+        #
         # @return [ Integer ] The document count.
         #
         # @since 2.0.0
-        def count
+        def count(options = {})
           cmd = { :count => collection.name, :query => selector }
           cmd[:skip] = options[:skip] if options[:skip]
           cmd[:hint] = options[:hint] if options[:hint]
           cmd[:limit] = options[:limit] if options[:limit]
-          database.command(cmd).n
+          database.command(cmd, options).n
         end
 
         # Get a list of distinct values for a specific field.
@@ -109,35 +129,21 @@ module Mongo
         # @example Get the distinct values.
         #   collection_view.distinct('name')
         #
-        # @param [ String, Symbol ] field The name of the field.
+        # @param [ String, Symbol ] field_name The name of the field.
+        # @param [ Hash ] options Options for the distinct command.
+        #
+        # @option options :read [ Hash ] The read preference for this command.
         #
         # @return [ Array<Object> ] The list of distinct values.
         #
         # @since 2.0.0
-        def distinct(field)
-          database.command(
+        def distinct(field_name, options={})
+          database.command({
             :distinct => collection.name,
-            :key => field.to_s,
-            :query => selector
+            :key => field_name.to_s,
+            :query => selector },
+            options
           ).documents.first['values']
-        end
-
-        # The fields to include or exclude from each doc in the result set.
-        #
-        # @example Set the fields to include or exclude.
-        #   view.projection(name: 1)
-        #
-        # @note A value of 0 excludes a field from the doc. A value of 1 includes it.
-        #   Values must all be 0 or all be 1, with the exception of the _id value.
-        #   The _id field is included by default. It must be excluded explicitly.
-        #
-        # @param [ Hash ] fields The field and 1 or 0, to include or exclude it.
-        #
-        # @return [ Hash, View ] Either the fields or a new +View+.
-        #
-        # @since 2.0.0
-        def projection(spec = nil)
-          configure(:projection, spec)
         end
 
         # The index that MongoDB will be forced to use for the query.
@@ -198,6 +204,37 @@ module Mongo
           configure(:max_scan, value)
         end
 
+        # The server normally times out idle cursors after an inactivity period
+        # (10 minutes) to prevent excess memory use. Set this option to prevent that.
+        #
+        # @example Set the cursor to not timeout.
+        #   view.no_cursor_timeout
+        #
+        # @return [ View ] The new view.
+        #
+        # @since 2.0.0
+        def no_cursor_timeout
+          configure_flag(:no_cursor_timeout)
+        end
+
+        # The fields to include or exclude from each doc in the result set.
+        #
+        # @example Set the fields to include or exclude.
+        #   view.projection(name: 1)
+        #
+        # @note A value of 0 excludes a field from the doc. A value of 1 includes it.
+        #   Values must all be 0 or all be 1, with the exception of the _id value.
+        #   The _id field is included by default. It must be excluded explicitly.
+        #
+        # @param [ Hash ] document The field and 1 or 0, to include or exclude it.
+        #
+        # @return [ Hash, View ] Either the fields or a new +View+.
+        #
+        # @since 2.0.0
+        def projection(document = nil)
+          configure(:projection, document)
+        end
+
         # The read preference to use for the query.
         #
         # @note If none is specified for the query, the read preference of the
@@ -234,7 +271,7 @@ module Mongo
         # @example Set the number to skip.
         #   view.skip(10)
         #
-        # @param [ Integer ] skip Number of docs to skip.
+        # @param [ Integer ] number Number of docs to skip.
         #
         # @return [ Integer, View ] Either the skip value or a
         #   new +View+.
@@ -277,11 +314,11 @@ module Mongo
         private
 
         def default_read(read = nil)
-          options[:read] || server_preference
+          options[:read] || read_preference
         end
 
         def flags
-          !primary? ? [ :slave_ok ] : []
+          @flags ||= (!primary? ? [ :slave_ok ] : [])
         end
 
         def has_special_fields?
@@ -299,6 +336,7 @@ module Mongo
         def query_spec
           sel = has_special_fields? ? special_selector : selector
           { :selector  => sel,
+            :read      => read,
             :options   => query_options,
             :db_name   => database.name,
             :coll_name => collection.name }

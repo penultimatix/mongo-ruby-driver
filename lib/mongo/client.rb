@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the 'License');
 # you may not use this file except in compliance with the License.
@@ -12,10 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-require 'mongo/write_concern/mode'
-require 'mongo/write_concern/acknowledged'
-require 'mongo/write_concern/unacknowledged'
-
 module Mongo
 
   # The client is the entry point to the driver and is the main object that
@@ -25,13 +21,13 @@ module Mongo
   class Client
     extend Forwardable
 
-    # @return [ Mongo::Cluster ] The cluster of servers for the client.
+    # @return [ Mongo::Cluster ] cluster The cluster of servers for the client.
     attr_reader :cluster
 
-    # @return [ Mongo::Database ] The database the client is operating on.
+    # @return [ Mongo::Database ] database The database the client is operating on.
     attr_reader :database
 
-    # @return [ Hash ] The configuration options.
+    # @return [ Hash ] options The configuration options.
     attr_reader :options
 
     # Delegate command execution to the current database.
@@ -92,28 +88,58 @@ module Mongo
     #   form of host:port or a MongoDB URI connection string.
     # @param [ Hash ] options The options to be used by the client.
     #
-    # @option options [ Symbol ] :auth_mech
-    # @option options [ String ] :auth_source
-    # @option options [ true, false ] :canonicalize_host_name
-    # @option options [ String ] :database
-    # @option options [ String ] :gssapi_service_name
-    # @option options [ Float ] :heartbeat_frequency
-    # @option options [ Symbol ] :mode
-    # @option options [ String ] :password
-    # @option options [ Integer ] :pool_size
-    # @option options [ Float ] :connect_timeout
-    # @option options [ Hash ] :read
-    # @option options [ Array<Hash, String> ] :roles
-    # @option options [ Symbol ] :replica_set_name
-    # @option options [ true, false ] :ssl
-    # @option options [ Float ] :socket_timeout
-    # @option options [ String ] :user
-    # @option options [ Symbol ] :write
+    # @option options [ Symbol ] :auth_mech The authentication mechanism to
+    #   use. One of :mongodb_cr, :mongodb_x509, :plain, :scram
+    # @option options [ String ] :auth_source The source to authenticate from.
+    # @option options [ Symbol ] :connect The connection method to use. This
+    #   forces the cluster to behave in the specified way instead of
+    #   auto-discovering. One of :direct, :replica_set, :sharded
+    # @option options [ String ] :database The database to connect to.
+    # @option options [ Hash ] :auth_mech_properties
+    # @option options [ Float ] :heartbeat_frequency The number of seconds for
+    #   the server monitor to refresh it's description via ismaster.
+    # @option options [ Integer ] :local_threshold The local threshold boundary
+    #   in seconds for selecting a near server for an operation.
+    # @option options [ Integer ] :server_selection_timeout The timeout in seconds
+    #   for selecting a server for an operation.
+    # @option options [ String ] :password The user's password.
+    # @option options [ Integer ] :max_pool_size The maximum size of the
+    #   connection pool.
+    # @option options [ Integer ] :min_pool_size The minimum size of the
+    #   connection pool.
+    # @option options [ Float ] :wait_queue_timeout The time to wait, in
+    #   seconds, in the connection pool for a connection to be checked in.
+    # @option options [ Float ] :connect_timeout The timeout, in seconds, to
+    #   attempt a connection.
+    # @option options [ Symbol ] :read The read preference options. :mode can
+    #   be one of :secondary, :secondary_preferred, :primary,
+    #   :primary_preferred, :nearest.
+    # @option options [ Array<Hash, String> ] :roles The list of roles for the
+    #   user.
+    # @option options [ Symbol ] :replica_set The name of the replica set to
+    #   connect to. Servers not in this replica set will be ignored.
+    # @option options [ true, false ] :ssl Whether to use SSL.
+    # @option options [ String ] :ssl_cert The certificate file used to identify
+    #   the connection against MongoDB.
+    # @option options [ String ] :ssl_key The private keyfile used to identify the
+    #   connection against MongoDB. Note that even if the key is stored in the same
+    #   file as the certificate, both need to be explicitly specified.
+    # @option options [ String ] :ssl_key_pass_phrase A passphrase for the private key.
+    # @option options [ true, false ] :ssl_verify Whether or not to do peer certification
+    #   validation.
+    # @option options [ String ] :ssl_ca_cert The file containing a set of concatenated
+    #   certification authority certifications used to validate certs passed from the
+    #   other end of the connection. Required for :ssl_verify.
+    # @option options [ Float ] :socket_timeout The timeout, in seconds, to
+    #   execute operations on a socket.
+    # @option options [ String ] :user The user name.
+    # @option options [ Hash ] :write The write concern options. Can be :w =>
+    #   Integer, :fsync => Boolean, :j => Boolean.
     #
     # @since 2.0.0
     def initialize(addresses_or_uri, options = {})
       if addresses_or_uri.is_a?(::String)
-        create_from_uri(addresses_or_uri)
+        create_from_uri(addresses_or_uri, options)
       else
         create_from_addresses(addresses_or_uri, options)
       end
@@ -131,17 +157,17 @@ module Mongo
       "<Mongo::Client:0x#{object_id} cluster=#{cluster.addresses.join(', ')}>"
     end
 
-    # Get the server (read) preference from the options passed to the client.
+    # Get the read preference from the options passed to the client.
     #
-    # @example Get the server (read) preference.
-    #   client.server_preference
+    # @example Get the read preference.
+    #   client.read_preference
     #
-    # @return [ Object ] The appropriate server preference or primary if none
+    # @return [ Object ] The appropriate read preference or primary if none
     #   was provided to the client.
     #
     # @since 2.0.0
-    def server_preference
-      @server_preference ||= ServerPreference.get(options[:read] || {})
+    def read_preference
+      @read_preference ||= ServerSelector.get(options[:read] || {}, options)
     end
 
     # Use the database with the provided name. This will switch the current
@@ -172,7 +198,14 @@ module Mongo
     #
     # @since 2.0.0
     def with(new_options = {})
-      Client.new(cluster.addresses.dup, options.merge(new_options))
+      clone.tap do |client|
+        client.options.update(new_options)
+        Database.create(client)
+        # We can't use the same cluster if authentication details have changed.
+        if new_options[:user] || new_options[:password]
+          Cluster.create(client)
+        end
+      end
     end
 
     # Get the write concern for this client. If no option was provided, then a
@@ -181,49 +214,33 @@ module Mongo
     # @example Get the client write concern.
     #   client.write_concern
     #
-    # @return [ Mongo::WriteConcern::Mode ] The write concern.
+    # @return [ Mongo::WriteConcern ] The write concern.
     #
     # @since 2.0.0
     def write_concern
-      @write_concern ||= WriteConcern::Mode.get(options[:write])
-    end
-
-    # Exception that is raised when trying to perform operations before ever
-    # telling the client which database to execute ops on.
-    #
-    # @since 2.0.0
-    class NoDatabase < DriverError
-
-      # The message does not need to be dynamic, so is held in a constant.
-      #
-      # @since 2.0.0
-      MESSAGE = 'No database has been set to operate on in the client. ' +
-        'Please do so via: client.use(:db_name).'
-
-      # Instantiate the new exception.
-      #
-      # @example Instantiate the exception.
-      #   NoDatabase.new
-      #
-      # @since 2.0.0
-      def initialize
-        super(MESSAGE)
-      end
+      @write_concern ||= WriteConcern.get(options[:write])
     end
 
     private
 
-    def create_from_addresses(addresses, options = {})
-      @cluster = Cluster.new(self, addresses, options)
-      @options = options.freeze
-      @database = Database.new(self, options[:database])
+    def create_from_addresses(addresses, opts = {})
+      @options = Database::DEFAULT_OPTIONS.merge(opts).freeze
+      @cluster = Cluster.new(addresses, options)
+      @database = Database.new(self, options[:database], options)
     end
 
-    def create_from_uri(connection_string)
+    def create_from_uri(connection_string, opts = {})
       uri = URI.new(connection_string)
-      @cluster = Cluster.new(self, uri.servers)
-      @options = uri.client_options.freeze
-      @database = Database.new(self, options[:database])
+      @options = Database::DEFAULT_OPTIONS.merge(uri.client_options.merge(opts)).freeze
+      @cluster = Cluster.new(uri.servers, options)
+      @database = Database.new(self, options[:database], options)
+    end
+
+    def initialize_copy(original)
+      @options = original.options.dup
+      @database = nil
+      @read_preference = nil
+      @write_concern = nil
     end
   end
 end

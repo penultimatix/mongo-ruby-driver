@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -38,7 +38,7 @@ module Mongo
       #
       # @since 2.0.0
       def connect!
-        Timeout.timeout(timeout, Mongo::SocketTimeoutError) do
+        Timeout.timeout(timeout, Error::SocketTimeoutError) do
           socket.connect(path)
           self
         end
@@ -47,11 +47,9 @@ module Mongo
       # Initializes a new Unix socket.
       #
       # @example Create the Unix socket.
-      #   Unix.new('::1', 27017, 30)
-      #   Unix.new('127.0.0.1', 27017, 30)
+      #   Unix.new('/path/to.sock', 27017, 30)
       #
-      # @param [ String ] host The hostname or IP address.
-      # @param [ Integer ] port The port number.
+      # @param [ String ] path The path.
       # @param [ Float ] timeout The socket timeout value.
       # @param [ Integer ] family The socket family.
       #

@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -59,7 +59,7 @@ module Mongo
         end
 
         # Get the documents for the aggregation result. This is either the
-        # first documents' 'result' field, or if a cursor option was selected
+        # first document's 'result' field, or if a cursor option was selected
         # it is the 'firstBatch' field in the 'cursor' field of the first
         # document returned.
         #
@@ -77,6 +77,10 @@ module Mongo
 
         def cursor_document
           @cursor_document ||= reply.documents[0][CURSOR]
+        end
+
+        def first_document
+          @first_document ||= reply.documents[0]
         end
       end
     end

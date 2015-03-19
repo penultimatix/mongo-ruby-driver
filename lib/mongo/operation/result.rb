@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -77,6 +77,16 @@ module Mongo
         acknowledged? ? replies.last.cursor_id : 0
       end
 
+      # Get the namespace of the cursor. The method should be defined in
+      # result classes where 'ns' is in the server response.
+      #
+      # @return [ Nil ]
+      #
+      # @since 2.0.0
+      def namespace
+        nil
+      end
+
       # Get the documents in the result.
       #
       # @example Get the documents.
@@ -142,7 +152,11 @@ module Mongo
       #
       # @since 2.0.0
       def reply
-        replies.first
+        if acknowledged?
+          replies.first
+        else
+          nil
+        end
       end
 
       # Get the count of documents returned by the server.
@@ -174,7 +188,12 @@ module Mongo
       #
       # @since 2.0.0
       def successful?
-        acknowledged? ? first[OK] == 1 : true
+        return true if !acknowledged?
+        if first_document.has_key?(OK)
+          first_document[OK] == 1 && parser.message.empty?
+        else
+          parser.message.empty?
+        end
       end
 
       # Validate the result by checking for any errors.
@@ -186,13 +205,13 @@ module Mongo
       # @example Validate the result.
       #   result.validate!
       #
-      # @raise [ Write::Failure ] If an error is in the result.
+      # @raise [ Error::OperationFailure ] If an error is in the result.
       #
       # @return [ Result ] The result if verification passed.
       #
       # @since 2.0.0
       def validate!
-        write_failure? ? raise(Write::Failure.new(first)) : self
+        !successful? ? raise(Error::OperationFailure.new(parser.message)) : self
       end
 
       # Get the number of documents written by the server.
@@ -205,7 +224,7 @@ module Mongo
       # @since 2.0.0
       def written_count
         if acknowledged?
-          multiple? ? aggregate_written_count : (first[N] || 0)
+          multiple? ? aggregate_written_count : (first_document[N] || 0)
         else
           0
         end
@@ -228,36 +247,12 @@ module Mongo
         end
       end
 
-      def command_failure?
-        acknowledged? && (!successful? || errors?)
+      def parser
+        @parser ||= Error::Parser.new(first_document)
       end
 
-      def errors?
-        first[Operation::ERROR] && first[Operation::ERROR_CODE]
-      end
-
-      def first
-        @first ||= documents[0] || {}
-      end
-
-      def write_concern_errors
-        first[Write::WRITE_CONCERN_ERROR] || []
-      end
-
-      def write_concern_errors?
-        !write_concern_errors.empty?
-      end
-
-      def write_errors
-        first[Write::WRITE_ERRORS] || []
-      end
-
-      def write_errors?
-        !write_errors.empty?
-      end
-
-      def write_failure?
-        acknowledged? && (command_failure? || write_errors? || write_concern_errors?)
+      def first_document
+        @first_document ||= first || BSON::Document.new
       end
     end
   end

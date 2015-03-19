@@ -15,6 +15,7 @@ describe Mongo::Server::Description do
         '127.0.0.1:27120'
       ],
       'primary' => '127.0.0.1:27019',
+      'tags' => { 'rack' => 'a' },
       'me' => '127.0.0.1:27019',
       'maxBsonObjectSize' => 16777216,
       'maxMessageSizeBytes' => 48000000,
@@ -25,8 +26,8 @@ describe Mongo::Server::Description do
     }
   end
 
-  let(:server) do
-    Mongo::Server.new('127.0.0.1:27019')
+  let(:address) do
+    Mongo::Address.new('127.0.0.1:27017')
   end
 
   describe '#arbiter?' do
@@ -34,7 +35,7 @@ describe Mongo::Server::Description do
     context 'when the server is an arbiter' do
 
       let(:description) do
-        described_class.new(server, { 'arbiterOnly' => true, 'setName' => 'test' })
+        described_class.new(address, { 'arbiterOnly' => true, 'setName' => 'test' })
       end
 
       it 'returns true' do
@@ -45,7 +46,7 @@ describe Mongo::Server::Description do
     context 'when the server is not an arbiter' do
 
       let(:description) do
-        described_class.new(server, replica)
+        described_class.new(address, replica)
       end
 
       it 'returns false' do
@@ -59,7 +60,7 @@ describe Mongo::Server::Description do
     context 'when the replica set has arbiters' do
 
       let(:description) do
-        described_class.new(server, replica)
+        described_class.new(address, replica)
       end
 
       it 'returns the arbiters' do
@@ -70,7 +71,7 @@ describe Mongo::Server::Description do
     context 'when the replica set has no arbiters' do
 
       let(:description) do
-        described_class.new(server, {})
+        described_class.new(address, {})
       end
 
       it 'returns an empty array' do
@@ -88,7 +89,7 @@ describe Mongo::Server::Description do
       end
 
       let(:description) do
-        described_class.new(server, config)
+        described_class.new(address, config)
       end
 
       it 'returns true' do
@@ -99,7 +100,7 @@ describe Mongo::Server::Description do
     context 'when the server is not a ghost' do
 
       let(:description) do
-        described_class.new(server, replica)
+        described_class.new(address, replica)
       end
 
       it 'returns false' do
@@ -113,7 +114,7 @@ describe Mongo::Server::Description do
     context 'when the server is hidden' do
 
       let(:description) do
-        described_class.new(server, { 'hidden' => true })
+        described_class.new(address, { 'hidden' => true })
       end
 
       it 'returns true' do
@@ -124,7 +125,7 @@ describe Mongo::Server::Description do
     context 'when the server is not hidden' do
 
       let(:description) do
-        described_class.new(server, replica)
+        described_class.new(address, replica)
       end
 
       it 'returns false' do
@@ -136,7 +137,7 @@ describe Mongo::Server::Description do
   describe '#hosts' do
 
     let(:description) do
-      described_class.new(server, replica)
+      described_class.new(address, replica)
     end
 
     it 'returns all the hosts in the replica set' do
@@ -147,7 +148,7 @@ describe Mongo::Server::Description do
   describe '#max_bson_object_size' do
 
     let(:description) do
-      described_class.new(server, replica)
+      described_class.new(address, replica)
     end
 
     it 'returns the value' do
@@ -158,7 +159,7 @@ describe Mongo::Server::Description do
   describe '#max_message_size' do
 
     let(:description) do
-      described_class.new(server, replica)
+      described_class.new(address, replica)
     end
 
     it 'returns the value' do
@@ -169,7 +170,7 @@ describe Mongo::Server::Description do
   describe '#max_write_batch_size' do
 
     let(:description) do
-      described_class.new(server, replica)
+      described_class.new(address, replica)
     end
 
     it 'returns the value' do
@@ -182,7 +183,7 @@ describe Mongo::Server::Description do
     context 'when the max wire version is provided' do
 
       let(:description) do
-        described_class.new(server, replica)
+        described_class.new(address, replica)
       end
 
       it 'returns the value' do
@@ -193,7 +194,7 @@ describe Mongo::Server::Description do
     context 'when the max wire version is not provided' do
 
       let(:description) do
-        described_class.new(server, {})
+        described_class.new(address, {})
       end
 
       it 'returns the default' do
@@ -207,7 +208,7 @@ describe Mongo::Server::Description do
     context 'when the min wire version is provided' do
 
       let(:description) do
-        described_class.new(server, replica)
+        described_class.new(address, replica)
       end
 
       it 'returns the value' do
@@ -218,11 +219,40 @@ describe Mongo::Server::Description do
     context 'when the min wire version is not provided' do
 
       let(:description) do
-        described_class.new(server, {})
+        described_class.new(address, {})
       end
 
       it 'returns the default' do
         expect(description.min_wire_version).to eq(0)
+      end
+    end
+  end
+
+  describe '#tags' do
+
+    context 'when the server has tags' do
+
+      let(:description) do
+        described_class.new(address, replica)
+      end
+
+      it 'returns the tags' do
+        expect(description.tags).to eq(replica['tags'])
+      end
+    end
+
+    context 'when the server does not have tags' do
+
+      let(:config) do
+        { 'ismaster' => true }
+      end
+
+      let(:description) do
+        described_class.new(address, config)
+      end
+
+      it 'returns an empty hash' do
+        expect(description.tags).to eq({})
       end
     end
   end
@@ -236,7 +266,7 @@ describe Mongo::Server::Description do
       end
 
       let(:description) do
-        described_class.new(server, config)
+        described_class.new(address, config)
       end
 
       it 'returns true' do
@@ -247,7 +277,7 @@ describe Mongo::Server::Description do
     context 'when the server is not a mongos' do
 
       let(:description) do
-        described_class.new(server, replica)
+        described_class.new(address, replica)
       end
 
       it 'returns false' do
@@ -261,7 +291,7 @@ describe Mongo::Server::Description do
     context 'when the server is passive' do
 
       let(:description) do
-        described_class.new(server, { 'passive' => true })
+        described_class.new(address, { 'passive' => true })
       end
 
       it 'returns true' do
@@ -272,11 +302,36 @@ describe Mongo::Server::Description do
     context 'when the server is not passive' do
 
       let(:description) do
-        described_class.new(server, replica)
+        described_class.new(address, replica)
       end
 
       it 'returns false' do
         expect(description).to_not be_passive
+      end
+    end
+  end
+
+  describe '#passives' do
+
+    context 'when passive servers exists' do
+
+      let(:description) do
+        described_class.new(address, { 'passives' => [ '127.0.0.1:27025' ] })
+      end
+
+      it 'returns a list of the passives' do
+        expect(description.passives).to eq([ '127.0.0.1:27025' ])
+      end
+    end
+
+    context 'when no passive servers exist' do
+
+      let(:description) do
+        described_class.new(address, replica)
+      end
+
+      it 'returns an empty array' do
+        expect(description.passives).to be_empty
       end
     end
   end
@@ -286,7 +341,7 @@ describe Mongo::Server::Description do
     context 'when the server is not a primary' do
 
       let(:description) do
-        described_class.new(server, { 'ismaster' => false })
+        described_class.new(address, { 'ismaster' => false })
       end
 
       it 'returns true' do
@@ -297,7 +352,7 @@ describe Mongo::Server::Description do
     context 'when the server is a primary' do
 
       let(:description) do
-        described_class.new(server, replica)
+        described_class.new(address, replica)
       end
 
       it 'returns false' do
@@ -306,18 +361,18 @@ describe Mongo::Server::Description do
     end
   end
 
-  describe '#round_trip_time' do
+  describe '#average_round_trip_time' do
 
     let(:description) do
-      described_class.new(server, { 'secondary' => false }, 4.5)
+      described_class.new(address, { 'secondary' => false }, 4.5)
     end
 
     it 'defaults to 0' do
-      expect(described_class.new(server).round_trip_time).to eq(0)
+      expect(described_class.new(address).average_round_trip_time).to eq(0)
     end
 
     it 'can be set via the constructor' do
-      expect(description.round_trip_time).to eq(4.5)
+      expect(description.average_round_trip_time).to eq(4.5)
     end
   end
 
@@ -326,7 +381,7 @@ describe Mongo::Server::Description do
     context 'when the server is in a replica set' do
 
       let(:description) do
-        described_class.new(server, replica)
+        described_class.new(address, replica)
       end
 
       it 'returns the replica set name' do
@@ -337,7 +392,7 @@ describe Mongo::Server::Description do
     context 'when the server is not in a replica set' do
 
       let(:description) do
-        described_class.new(server, {})
+        described_class.new(address, {})
       end
 
       it 'returns nil' do
@@ -351,7 +406,7 @@ describe Mongo::Server::Description do
     context 'when the server is not a secondary' do
 
       let(:description) do
-        described_class.new(server, { 'secondary' => false })
+        described_class.new(address, { 'secondary' => false })
       end
 
       it 'returns true' do
@@ -362,7 +417,7 @@ describe Mongo::Server::Description do
     context 'when the server is a secondary' do
 
       let(:description) do
-        described_class.new(server, { 'secondary' => true, 'setName' => 'test' })
+        described_class.new(address, { 'secondary' => true, 'setName' => 'test' })
       end
 
       it 'returns false' do
@@ -371,12 +426,29 @@ describe Mongo::Server::Description do
     end
   end
 
+  describe '#servers' do
+
+    let(:config) do
+      replica.merge({ 'passives' => [ '127.0.0.1:27025' ]})
+    end
+
+    let(:description) do
+      described_class.new(address, config)
+    end
+
+    it 'returns the hosts + arbiters + passives' do
+      expect(description.servers).to eq(
+        [ '127.0.0.1:27018', '127.0.0.1:27019', '127.0.0.1:27120', '127.0.0.1:27025' ]
+      )
+    end
+  end
+
   describe '#standalone?' do
 
     context 'when the server is standalone' do
 
       let(:description) do
-        described_class.new(server, { 'ismaster' => true })
+        described_class.new(address, { 'ismaster' => true, 'ok' => 1 })
       end
 
       it 'returns true' do
@@ -387,7 +459,7 @@ describe Mongo::Server::Description do
     context 'when the server is part of a replica set' do
 
       let(:description) do
-        described_class.new(server, replica)
+        described_class.new(address, replica)
       end
 
       it 'returns false' do
@@ -401,7 +473,18 @@ describe Mongo::Server::Description do
     context 'when the description has no configuration' do
 
       let(:description) do
-        described_class.new(server)
+        described_class.new(address)
+      end
+
+      it 'returns true' do
+        expect(description).to be_unknown
+      end
+    end
+
+    context 'when the command was not ok' do
+
+      let(:description) do
+        described_class.new(address, { 'ok' => 0 })
       end
 
       it 'returns true' do
@@ -412,11 +495,11 @@ describe Mongo::Server::Description do
     context 'when the description has a configuration' do
 
       let(:config) do
-        { 'hosts' => [ '127.0.0.1:27019', '127.0.0.1:27020' ] }
+        { 'hosts' => [ '127.0.0.1:27019', '127.0.0.1:27020' ], 'ok' => 1 }
       end
 
       let(:description) do
-        described_class.new(server, config)
+        described_class.new(address, config)
       end
 
       it 'returns false' do
@@ -424,6 +507,4 @@ describe Mongo::Server::Description do
       end
     end
   end
-
-  pending '#update!'
 end

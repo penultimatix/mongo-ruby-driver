@@ -2,10 +2,18 @@ require 'spec_helper'
 
 describe Mongo::Server do
 
+  let(:listeners) do
+    Mongo::Event::Listeners.new
+  end
+
+  let(:address) do
+    Mongo::Address.new('127.0.0.1:27017')
+  end
+
   describe '#==' do
 
     let(:server) do
-      described_class.new('127.0.0.1:27017')
+      described_class.new(address, listeners)
     end
 
     context 'when the other is not a server' do
@@ -24,7 +32,7 @@ describe Mongo::Server do
       context 'when the addresses match' do
 
         let(:other) do
-          described_class.new('127.0.0.1:27017')
+          described_class.new(address, listeners)
         end
 
         it 'returns true' do
@@ -32,10 +40,14 @@ describe Mongo::Server do
         end
       end
 
-      context 'when the addresses dont match', simulator: 'cluster' do
+      context 'when the addresses dont match' do
+
+        let(:other_address) do
+          Mongo::Address.new('127.0.0.1:27018')
+        end
 
         let(:other) do
-          described_class.new('127.0.0.1:27018')
+          described_class.new(other_address, listeners)
         end
 
         it 'returns false' do
@@ -48,7 +60,7 @@ describe Mongo::Server do
   describe '#context' do
 
     let(:server) do
-      described_class.new('127.0.0.1:27017')
+      described_class.new(address, listeners)
     end
 
     let(:context) do
@@ -60,14 +72,22 @@ describe Mongo::Server do
     end
   end
 
-  describe '#initialize' do
-
-    let(:address) do
-      '127.0.0.1:27017'
-    end
+  describe '#disconnect!' do
 
     let(:server) do
-      described_class.new(address, :heartbeat_frequency => 5)
+      described_class.new(address, listeners)
+    end
+
+    it 'stops the monitor instance' do
+      expect(server.instance_variable_get(:@monitor)).to receive(:stop!).and_return(true)
+      server.disconnect!
+    end
+  end
+
+  describe '#initialize' do
+
+    let(:server) do
+      described_class.new(address, listeners, :heartbeat_frequency => 5)
     end
 
     it 'sets the address host' do
@@ -78,10 +98,6 @@ describe Mongo::Server do
       expect(server.address.port).to eq(27017)
     end
 
-    it 'sets the address ip' do
-      expect(server.address.ip).to eq('127.0.0.1')
-    end
-
     it 'sets the options' do
       expect(server.options).to eq(:heartbeat_frequency => 5)
     end
@@ -90,7 +106,7 @@ describe Mongo::Server do
   describe '#pool' do
 
     let(:server) do
-      described_class.new('127.0.0.1:27017')
+      described_class.new(address, listeners)
     end
 
     let(:pool) do
@@ -98,7 +114,18 @@ describe Mongo::Server do
     end
 
     it 'returns the connection pool for the server' do
-      expect(pool.pool_size).to eq(5)
+      expect(pool).to be_a(Mongo::Server::ConnectionPool)
+    end
+  end
+
+  describe '#scan!' do
+
+    let(:server) do
+      described_class.new(address, listeners)
+    end
+
+    it 'forces a scan on the monitor' do
+      expect(server.scan!).to eq(server.description)
     end
   end
 end

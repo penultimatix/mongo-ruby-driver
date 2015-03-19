@@ -25,6 +25,50 @@ describe Mongo::Auth::User do
     end
   end
 
+  describe '#encoded_name' do
+
+    context 'when the user name contains an =' do
+
+      let(:options) do
+        { user: 'user=' }
+      end
+
+      it 'escapes the = character to =3D' do
+        expect(user.encoded_name).to eq('user=3D')
+      end
+
+      it 'returns a UTF-8 string' do
+        expect(user.encoded_name.encoding.name).to eq('UTF-8')
+      end
+    end
+
+    context 'when the user name contains a ,' do
+
+      let(:options) do
+        { user: 'user,' }
+      end
+
+      it 'escapes the , character to =2C' do
+        expect(user.encoded_name).to eq('user=2C')
+      end
+
+      it 'returns a UTF-8 string' do
+        expect(user.encoded_name.encoding.name).to eq('UTF-8')
+      end
+    end
+
+    context 'when the user name contains no special characters' do
+
+      it 'does not alter the user name' do
+        expect(user.name).to eq('user')
+      end
+
+      it 'returns a UTF-8 string' do
+        expect(user.encoded_name.encoding.name).to eq('UTF-8')
+      end
+    end
+  end
+
   describe '#initialize' do
 
     it 'sets the database' do
@@ -80,12 +124,18 @@ describe Mongo::Auth::User do
     end
   end
 
-  describe '#gssapi_service_name' do
+  describe '#auth_mech_properties' do
 
     context 'when the option is provided' do
 
+      let(:auth_mech_properties) do
+        { service_name: 'test',
+          service_realm: 'test',
+          canonicalize_host_name: true }
+      end
+
       let(:options) do
-        { database: 'testing', user: 'user', password: 'pass', gssapi_service_name: 'test' }
+        { database: 'testing', user: 'user', password: 'pass', auth_mech_properties: auth_mech_properties }
       end
 
       let(:user) do
@@ -93,7 +143,7 @@ describe Mongo::Auth::User do
       end
 
       it 'returns the option' do
-        expect(user.gssapi_service_name).to eq('test')
+        expect(user.auth_mech_properties).to eq(auth_mech_properties)
       end
     end
 
@@ -103,37 +153,8 @@ describe Mongo::Auth::User do
         described_class.new(options)
       end
 
-      it 'returns the default' do
-        expect(user.gssapi_service_name).to eq('mongodb')
-      end
-    end
-  end
-
-  describe '#canonicalize_host_name' do
-
-    context 'when the option is provided' do
-
-      let(:options) do
-        { database: 'testing', user: 'user', password: 'pass', canonicalize_host_name: true }
-      end
-
-      let(:user) do
-        described_class.new(options)
-      end
-
-      it 'returns the option' do
-        expect(user.canonicalize_host_name).to be true
-      end
-    end
-
-    context 'when no option is provided' do
-
-      let(:user) do
-        described_class.new(options)
-      end
-
-      it 'returns the default' do
-        expect(user.canonicalize_host_name).to be false
+      it 'returns an empty hash' do
+        expect(user.auth_mech_properties).to eq({})
       end
     end
   end

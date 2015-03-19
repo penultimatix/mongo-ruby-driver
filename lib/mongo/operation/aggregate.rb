@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -44,6 +44,11 @@ module Mongo
       include Specifiable
       include Limited
 
+      # The need primary error message.
+      #
+      # @since 2.0.0
+      ERROR_MESSAGE = "The pipeline contains the '$out' operator so the primary must be used.".freeze
+
       # Execute the operation.
       # The context gets a connection on which the operation
       # is sent in the block.
@@ -51,16 +56,14 @@ module Mongo
       # server is not primary, the operation will be rerouted to the primary
       # with a warning.
       #
-      # @params [ Mongo::Server::Context ] The context for this operation.
+      # @param [ Server::Context ] context The context for this operation.
       #
       # @return [ Result ] The operation response, if there is one.
       #
       # @since 2.0.0
       def execute(context)
-        # @todo: Should we respect tag sets and options here?
-        if context.server.secondary? && !secondary_ok?
-          warn "Database command '#{selector.keys.first}' rerouted to primary server"
-          context = Mongo::ServerPreference.get(:mode => :primary).server.context
+        unless context.standalone? || context.primary? || secondary_ok?
+          raise Error::NeedPrimaryServer.new(ERROR_MESSAGE)
         end
         execute_message(context)
       end
@@ -69,7 +72,7 @@ module Mongo
 
       def execute_message(context)
         context.with_connection do |connection|
-          Result.new(connection.dispatch([ message(context) ]))
+          Result.new(connection.dispatch([ message(context) ])).validate!
         end
       end
 
@@ -85,7 +88,7 @@ module Mongo
       end
 
       def filter(context)
-        return selector if context.write_command_enabled?
+        return selector if context.features.write_command_enabled?
         selector.reject{ |option, value| option.to_s == 'cursor' }
       end
 
@@ -95,4 +98,3 @@ module Mongo
     end
   end
 end
-

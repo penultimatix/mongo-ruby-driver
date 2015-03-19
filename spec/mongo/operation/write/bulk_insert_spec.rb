@@ -1,20 +1,21 @@
 require 'spec_helper'
 
 describe Mongo::Operation::Write::BulkInsert do
+  include_context 'operation'
 
   let(:documents) do
     [{ :name => 'test' }]
   end
 
   let(:spec) do
-    { :documents     => documents,
-      :db_name       => TEST_DB,
-      :coll_name     => TEST_COLL,
-      :write_concern => Mongo::WriteConcern::Mode.get(:w => 1)
+    { documents: documents,
+      db_name: db_name,
+      coll_name: coll_name,
+      write_concern: write_concern
     }
   end
 
-  let(:insert) do
+  let(:op) do
     described_class.new(spec)
   end
 
@@ -23,7 +24,7 @@ describe Mongo::Operation::Write::BulkInsert do
     context 'spec' do
 
       it 'sets the spec' do
-        expect(insert.spec).to eq(spec)
+        expect(op.spec).to eq(spec)
       end
     end
   end
@@ -39,7 +40,7 @@ describe Mongo::Operation::Write::BulkInsert do
         end
 
         it 'returns true' do
-          expect(insert).to eq(other)
+          expect(op).to eq(other)
         end
       end
 
@@ -52,7 +53,7 @@ describe Mongo::Operation::Write::BulkInsert do
         let(:other_spec) do
           { :documents     => other_docs,
             :db_name       => 'test',
-            :coll_name     => 'test_coll',
+            :coll_name     => 'coll_name',
             :write_concern => { 'w' => 1 },
             :ordered       => true
           }
@@ -63,7 +64,7 @@ describe Mongo::Operation::Write::BulkInsert do
         end
 
         it 'returns false' do
-          expect(insert).not_to eq(other)
+          expect(op).not_to eq(other)
         end
       end
     end
@@ -73,9 +74,9 @@ describe Mongo::Operation::Write::BulkInsert do
 
     context 'deep copy' do
 
-      it 'copies the list of updates' do
-        copy = insert.dup
-        expect(copy.spec[:documents]).to_not be(insert.spec[:documents])
+      it 'copies the list of documents' do
+        copy = op.dup
+        expect(copy.spec[:documents]).to_not be(op.spec[:documents])
       end
     end
   end
@@ -83,12 +84,12 @@ describe Mongo::Operation::Write::BulkInsert do
   describe '#execute' do
 
     before do
-      authorized_collection.indexes.ensure({ name: 1 }, { unique: true })
+      authorized_collection.indexes.create_one({ name: 1 }, { unique: true })
     end
 
     after do
-      authorized_collection.find.remove_many
-      authorized_collection.indexes.drop({ name: 1 })
+      authorized_collection.find.delete_many
+      authorized_collection.indexes.drop_one('name_1')
     end
 
     context 'when inserting a single document' do
@@ -96,7 +97,7 @@ describe Mongo::Operation::Write::BulkInsert do
       context 'when the insert succeeds' do
 
         let(:response) do
-          insert.execute(authorized_primary.context)
+          op.execute(authorized_primary.context)
         end
 
         it 'inserts the documents into the database', if: write_command_enabled? do
@@ -105,32 +106,6 @@ describe Mongo::Operation::Write::BulkInsert do
 
         it 'inserts the documents into the database', unless: write_command_enabled? do
           expect(response.written_count).to eq(0)
-        end
-      end
-
-      context 'when the insert fails' do
-
-        let(:documents) do
-          [{ name: 'test' }]
-        end
-
-        let(:spec) do
-          { :documents     => documents,
-            :db_name       => TEST_DB,
-            :coll_name     => TEST_COLL,
-            :write_concern => Mongo::WriteConcern::Mode.get(:w => 1)
-          }
-        end
-
-        let(:failing_insert) do
-          described_class.new(spec)
-        end
-
-        it 'raises an error' do
-          expect {
-            failing_insert.execute(authorized_primary.context)
-            failing_insert.execute(authorized_primary.context)
-          }.to raise_error(Mongo::Operation::Write::Failure)
         end
       end
     end
@@ -144,7 +119,7 @@ describe Mongo::Operation::Write::BulkInsert do
         end
 
         let(:response) do
-          insert.execute(authorized_primary.context)
+          op.execute(authorized_primary.context)
         end
 
         it 'inserts the documents into the database', if: write_command_enabled? do
@@ -155,117 +130,106 @@ describe Mongo::Operation::Write::BulkInsert do
           expect(response.written_count).to eq(0)
         end
       end
+    end
 
-      context 'when the insert fails on the last document' do
+    context 'when the inserts are ordered' do
 
-        let(:documents) do
-          [{ name: 'test3' }, { name: 'test' }]
+      let(:documents) do
+        [{ name: 'test' }, { name: 'test' }, { name: 'test1' }]
+      end
+
+      let(:spec) do
+        { documents: documents,
+          db_name: db_name,
+          coll_name: coll_name,
+          write_concern: write_concern,
+          ordered: true
+        }
+      end
+
+      let(:failing_insert) do
+        described_class.new(spec)
+      end
+
+      context 'when write concern is acknowledged' do
+
+        let(:write_concern) do
+          Mongo::WriteConcern.get(w: 1)
         end
 
-        let(:spec) do
-          { :documents     => documents,
-            :db_name       => TEST_DB,
-            :coll_name     => TEST_COLL,
-            :write_concern => Mongo::WriteConcern::Mode.get(:w => 1)
-          }
-        end
-
-        let(:failing_insert) do
-          described_class.new(spec)
-        end
-
-        it 'raises an error' do
-          expect {
+        context 'when the insert fails' do
+    
+          it 'aborts after first error' do
             failing_insert.execute(authorized_primary.context)
-            failing_insert.execute(authorized_primary.context)
-          }.to raise_error(Mongo::Operation::Write::Failure)
+            expect(authorized_collection.find.count).to eq(1)
+          end
         end
       end
 
-      context 'when the insert fails on the first document' do
+      context 'when write concern is unacknowledged' do
 
-        let(:documents) do
-          [{ name: 'test' }, { name: 'test4' }]
+        let(:write_concern) do
+          Mongo::WriteConcern.get(w: 0)
         end
 
-        let(:spec) do
-          { :documents     => documents,
-            :db_name       => TEST_DB,
-            :coll_name     => TEST_COLL,
-            :write_concern => Mongo::WriteConcern::Mode.get(:w => 1)
-          }
-        end
+        context 'when the insert fails' do
 
-        let(:failing_insert) do
-          described_class.new(spec)
-        end
-
-        it 'raises an error' do
-          expect {
+          it 'aborts after first error' do
             failing_insert.execute(authorized_primary.context)
-            failing_insert.execute(authorized_primary.context)
-          }.to raise_error(Mongo::Operation::Write::Failure)
-        end
-      end
-
-      context 'when the inserts are ordered' do
-
-        let(:documents) do
-          [{ name: 'test' }, { name: 'test' }, { name: 'test1' }]
-        end
-
-        let(:spec) do
-          { :documents     => documents,
-            :db_name       => TEST_DB,
-            :coll_name     => TEST_COLL,
-            :write_concern => Mongo::WriteConcern::Mode.get(:w => 1),
-            :ordered       => true
-          }
-        end
-
-        let(:failing_insert) do
-          described_class.new(spec)
-        end
-  
-        it 'aborts after first error' do
-          expect {
-            failing_insert.execute(authorized_primary.context)
-          }.to raise_error(Mongo::Operation::Write::Failure)
-          expect(authorized_collection.find.count).to eq(1)
-        end
-      end
-
-      context 'when the inserts are unordered' do
-
-        let(:documents) do
-          [{ name: 'test' }, { name: 'test' }, { name: 'test1' }]
-        end
-
-        let(:spec) do
-          { :documents     => documents,
-            :db_name       => TEST_DB,
-            :coll_name     => TEST_COLL,
-            :write_concern => Mongo::WriteConcern::Mode.get(:w => 1),
-            :ordered       => false
-          }
-        end
-
-        let(:failing_insert) do
-          described_class.new(spec)
-        end
-
-        it 'continues executing operations after errors' do
-          expect {
-            failing_insert.execute(authorized_primary.context)
-          }.to raise_error(Mongo::Operation::Write::Failure)
-          expect(authorized_collection.find.count).to eq(2)
+            expect(authorized_collection.find.count).to eq(1)
+          end
         end
       end
     end
 
-    context 'when the server is a secondary' do
+    context 'when the inserts are unordered' do
 
-      pending 'it raises an exception'
+      let(:documents) do
+        [{ name: 'test' }, { name: 'test' }, { name: 'test1' }]
+      end
+
+      let(:spec) do
+        { documents: documents,
+          db_name: db_name,
+          coll_name: coll_name,
+          write_concern: write_concern,
+          ordered: false
+        }
+      end
+
+      let(:failing_insert) do
+        described_class.new(spec)
+      end
+
+      context 'when write concern is acknowledged' do
+
+        let(:write_concern) do
+          Mongo::WriteConcern.get(w: 1)
+        end
+
+        context 'when the insert fails' do
+    
+          it 'does not abort after first error' do
+            failing_insert.execute(authorized_primary.context)
+            expect(authorized_collection.find.count).to eq(2)
+          end
+        end
+      end
+
+      context 'when write concern is unacknowledged' do
+
+        let(:write_concern) do
+          Mongo::WriteConcern.get(w: 0)
+        end
+
+        context 'when the insert fails' do
+
+          it 'does not after first error' do
+            failing_insert.execute(authorized_primary.context)
+            expect(authorized_collection.find.count).to eq(2)
+          end
+        end
+      end
     end
   end
 end

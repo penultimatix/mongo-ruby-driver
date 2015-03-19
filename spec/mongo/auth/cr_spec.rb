@@ -2,12 +2,16 @@ require 'spec_helper'
 
 describe Mongo::Auth::CR do
 
+  let(:address) do
+    Mongo::Address.new(DEFAULT_ADDRESS)
+  end
+
   let(:server) do
-    Mongo::Server.new('127.0.0.1:27017')
+    Mongo::Server.new(address, Mongo::Event::Listeners.new)
   end
 
   let(:connection) do
-    Mongo::Connection.new(server)
+    Mongo::Server::Connection.new(server)
   end
 
   describe '#login' do
@@ -48,7 +52,7 @@ describe Mongo::Auth::CR do
       cr.login(connection).documents[0]
     end
 
-    it 'logs the user into the connection' do
+    it 'logs the user into the connection', unless: scram_sha_1_enabled? do
       expect(cr.login(connection).documents[0]['ok']).to eq(1)
     end
   end

@@ -5,7 +5,11 @@ describe Mongo::Client do
   describe '#==' do
 
     let(:client) do
-      described_class.new(['127.0.0.1:27017'], :read => :primary, :database => TEST_DB)
+      described_class.new(
+        ['127.0.0.1:27017'],
+        :read => { :mode => :primary },
+        :database => TEST_DB
+      )
     end
 
     context 'when the other is a client' do
@@ -13,7 +17,11 @@ describe Mongo::Client do
       context 'when the options and cluster are equal' do
 
         let(:other) do
-          described_class.new(['127.0.0.1:27017'], :read => :primary, :database => TEST_DB)
+          described_class.new(
+            ['127.0.0.1:27017'],
+            :read => { :mode => :primary },
+            :database => TEST_DB
+          )
         end
 
         it 'returns true' do
@@ -24,7 +32,11 @@ describe Mongo::Client do
       context 'when the options and cluster are not equal' do
 
         let(:other) do
-          described_class.new(['127.0.0.1:27017'], :read => :secondary, :database => TEST_DB)
+          described_class.new(
+            ['127.0.0.1:27017'],
+            :read => { :mode => :secondary },
+            :database => TEST_DB
+          )
         end
 
         it 'returns true' do
@@ -80,7 +92,11 @@ describe Mongo::Client do
   describe '#eql' do
 
     let(:client) do
-      described_class.new(['127.0.0.1:27017'], :read => :primary, :database => TEST_DB)
+      described_class.new(
+        ['127.0.0.1:27017'],
+        :read => { :mode => :primary },
+        :database => TEST_DB
+      )
     end
 
     context 'when the other is a client' do
@@ -88,7 +104,11 @@ describe Mongo::Client do
       context 'when the options and cluster are equal' do
 
         let(:other) do
-          described_class.new(['127.0.0.1:27017'], :read => :primary, :database => TEST_DB)
+          described_class.new(
+            ['127.0.0.1:27017'],
+            :read => { :mode => :primary },
+            :database => TEST_DB
+          )
         end
 
         it 'returns true' do
@@ -99,7 +119,11 @@ describe Mongo::Client do
       context 'when the options and cluster are not equal' do
 
         let(:other) do
-          described_class.new(['127.0.0.1:27017'], :read => :secondary, :database => TEST_DB)
+          described_class.new(
+            ['127.0.0.1:27017'],
+            :read => { :mode => :secondary },
+            :database => TEST_DB
+          )
         end
 
         it 'returns true' do
@@ -111,7 +135,11 @@ describe Mongo::Client do
     context 'when the other is not a client' do
 
       let(:client) do
-        described_class.new(['127.0.0.1:27017'], :read => :primary, :database => TEST_DB)
+        described_class.new(
+          ['127.0.0.1:27017'],
+          :read => { :mode => :primary },
+          :database => TEST_DB
+        )
       end
 
       it 'returns false' do
@@ -123,11 +151,20 @@ describe Mongo::Client do
   describe '#hash' do
 
     let(:client) do
-      described_class.new(['127.0.0.1:27017'], :read => :primary, :database => TEST_DB)
+      described_class.new(
+        ['127.0.0.1:27017'],
+        :read => { :mode => :primary },
+        :local_threshold_ms => 10,
+        :server_selection_timeout_ms => 10000,
+        :database => TEST_DB
+      )
     end
 
     let(:expected) do
-      [client.cluster, { :read => :primary, :database => TEST_DB }].hash
+      [client.cluster, { :read => { :mode => :primary },
+                         :local_threshold_ms => 10,
+                         :server_selection_timeout_ms => 10000,
+                         :database => TEST_DB }].hash
     end
 
     it 'returns a hash of the cluster and options' do
@@ -138,12 +175,16 @@ describe Mongo::Client do
   describe '#inspect' do
 
     let(:client) do
-      described_class.new(['127.0.0.1:27017'], :read => :primary, :database => TEST_DB)
+      described_class.new(
+        ['127.0.0.1:27017'],
+        :read => { :mode => :primary },
+        :database => TEST_DB
+      )
     end
 
     it 'returns the cluster information' do
-      expect(client.inspect).to eq(
-        "<Mongo::Client:0x#{client.object_id} cluster=127.0.0.1:27017>"
+      expect(client.inspect).to include(
+        "<Mongo::Client:0x#{client.object_id} cluster=127.0.0.1:27017"
       )
     end
   end
@@ -155,11 +196,11 @@ describe Mongo::Client do
       context 'when no database is provided' do
 
         let(:client) do
-          described_class.new(['127.0.0.1:27017'], :read => :secondary, :database => TEST_DB)
+          described_class.new(['127.0.0.1:27017'], :read => { :mode => :secondary })
         end
 
-        it 'sets the options on the client' do
-          expect(client.options).to eq(:read => :secondary, :database => TEST_DB)
+        it 'defaults the database to admin' do
+          expect(client.database.name).to eq('admin')
         end
       end
 
@@ -202,8 +243,8 @@ describe Mongo::Client do
           described_class.new(uri)
         end
 
-        it 'raises an error' do
-          expect { client }.to raise_error(Mongo::Database::InvalidName)
+        it 'defaults the database to admin' do
+          expect(client.database.name).to eq('admin')
         end
       end
 
@@ -221,17 +262,64 @@ describe Mongo::Client do
           expect(client.options).to eq(:write => { :w => 3 }, :database => 'testdb')
         end
       end
+
+      context 'when options are provided not in the string' do
+
+        let!(:uri) do
+          'mongodb://127.0.0.1:27017/testdb'
+        end
+
+        let(:client) do
+          described_class.new(uri, :write => { :w => 3 })
+        end
+
+        it 'sets the options' do
+          expect(client.options).to eq(:write => { :w => 3 }, :database => 'testdb')
+        end
+      end
+
+      context 'when options are provided in the string and explicitly' do
+
+        let!(:uri) do
+          'mongodb://127.0.0.1:27017/testdb?w=3'
+        end
+
+        let(:client) do
+          described_class.new(uri, :write => { :w => 4 })
+        end
+
+        it 'allows explicit options to take preference' do
+          expect(client.options).to eq(:write => { :w => 4 }, :database => 'testdb')
+        end
+      end
+
+      context 'when a replica set name is provided' do
+
+        let!(:uri) do
+          'mongodb://127.0.0.1:27017/testdb?replicaSet=testing'
+        end
+
+        let(:client) do
+          described_class.new(uri)
+        end
+
+        it 'sets the correct cluster topology' do
+          expect(client.cluster.topology).to be_a(Mongo::Cluster::Topology::ReplicaSet)
+        end
+      end
     end
   end
 
-  describe '#server_preference' do
+  describe '#read_preference' do
 
     let(:client) do
-      described_class.new(['127.0.0.1:27017'], :database => TEST_DB, :read => mode)
+      described_class.new(['127.0.0.1:27017'],
+                          :database => TEST_DB,
+                          :read => mode)
     end
 
     let(:preference) do
-      client.server_preference
+      client.read_preference
     end
 
     context 'when mode is primary' do
@@ -240,8 +328,12 @@ describe Mongo::Client do
         { :mode => :primary }
       end
 
-      it 'returns a primary server preference' do
-        expect(preference).to be_a(Mongo::ServerPreference::Primary)
+      it 'returns a primary read preference' do
+        expect(preference).to be_a(Mongo::ServerSelector::Primary)
+      end
+
+      it 'passes the options to the read preference' do
+        expect(preference.options[:database]).to eq(TEST_DB)
       end
     end
 
@@ -251,8 +343,8 @@ describe Mongo::Client do
         { :mode => :primary_preferred }
       end
 
-      it 'returns a primary preferred server preference' do
-        expect(preference).to be_a(Mongo::ServerPreference::PrimaryPreferred)
+      it 'returns a primary preferred read preference' do
+        expect(preference).to be_a(Mongo::ServerSelector::PrimaryPreferred)
       end
     end
 
@@ -262,8 +354,8 @@ describe Mongo::Client do
         { :mode => :secondary }
       end
 
-      it 'returns a secondary server preference' do
-        expect(preference).to be_a(Mongo::ServerPreference::Secondary)
+      it 'returns a secondary read preference' do
+        expect(preference).to be_a(Mongo::ServerSelector::Secondary)
       end
     end
 
@@ -273,8 +365,8 @@ describe Mongo::Client do
         { :mode => :secondary_preferred }
       end
 
-      it 'returns a secondary preferred server preference' do
-        expect(preference).to be_a(Mongo::ServerPreference::SecondaryPreferred)
+      it 'returns a secondary preferred read preference' do
+        expect(preference).to be_a(Mongo::ServerSelector::SecondaryPreferred)
       end
     end
 
@@ -284,8 +376,8 @@ describe Mongo::Client do
         { :mode => :nearest }
       end
 
-      it 'returns a nearest server preference' do
-        expect(preference).to be_a(Mongo::ServerPreference::Nearest)
+      it 'returns a nearest read preference' do
+        expect(preference).to be_a(Mongo::ServerSelector::Nearest)
       end
     end
 
@@ -295,8 +387,8 @@ describe Mongo::Client do
         {}
       end
 
-      it 'returns a primary server preference' do
-        expect(preference).to be_a(Mongo::ServerPreference::Primary)
+      it 'returns a primary read preference' do
+        expect(preference).to be_a(Mongo::ServerSelector::Primary)
       end
     end
   end
@@ -334,10 +426,10 @@ describe Mongo::Client do
 
     context 'when providing nil' do
 
-      it 'raises an error' do
-        expect do
+      it 'raises an exception' do
+        expect {
           client.use(nil)
-        end.to raise_error(Mongo::Database::InvalidName)
+        }.to raise_error(Mongo::Error::InvalidDatabaseName)
       end
     end
   end
@@ -349,12 +441,12 @@ describe Mongo::Client do
       let(:client) do
         described_class.new(
           ['127.0.0.1:27017'],
-          :read => :secondary, :write => { :w => 1 }, :database => TEST_DB
+          :read => { :mode => :secondary }, :write => { :w => 1 }, :database => TEST_DB
         )
       end
 
       let!(:new_client) do
-        client.with(:read => :primary)
+        client.with(:read => { :mode => :primary })
       end
 
       it 'returns a new client' do
@@ -362,15 +454,19 @@ describe Mongo::Client do
       end
 
       it 'replaces the existing options' do
-        expect(new_client.options).to eq(:read => :primary, :write => { :w => 1 }, :database => TEST_DB)
+        expect(new_client.options).to eq({
+          :read => { :mode => :primary }, :write => { :w => 1 }, :database => TEST_DB
+        })
       end
 
       it 'does not modify the original client' do
-        expect(client.options).to eq(:read => :secondary, :write => { :w => 1 }, :database => TEST_DB)
+        expect(client.options).to eq({
+          :read => { :mode => :secondary }, :write => { :w => 1 }, :database => TEST_DB
+        })
       end
 
-      it 'clones the cluster addresses' do
-        expect(new_client.cluster.addresses).not_to equal(client.cluster.addresses)
+      it 'keeps the same cluster' do
+        expect(new_client.cluster).to equal(client.cluster)
       end
     end
 

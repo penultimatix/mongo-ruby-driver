@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -44,6 +44,24 @@ module Mongo
         @namespace = "#{database}.#{collection}"
         @selector  = selector
         @flags     = options[:flags] || []
+      end
+
+      # The log message for a delete operation.
+      #
+      # @example Get the log message.
+      #   delete.log_message
+      #
+      # @return [ String ] The log message
+      #
+      # @since 2.0.0
+      def log_message
+        fields = []
+        fields << ["%s |", "DELETE"]
+        fields << ["namespace=%s", namespace]
+        fields << ["selector=%s", selector.inspect]
+        fields << ["flags=%s", flags.inspect]
+        f, v = fields.transpose
+        f.join(" ") % v
       end
 
       private

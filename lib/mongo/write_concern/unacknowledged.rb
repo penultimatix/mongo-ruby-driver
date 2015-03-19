@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the 'License');
 # you may not use this file except in compliance with the License.
@@ -19,7 +19,8 @@ module Mongo
     # network and connection exceptions.
     #
     # @since 2.0.0
-    class Unacknowledged < Mode
+    class Unacknowledged
+      include Normalizable
 
       # The noop constant for the gle.
       #
@@ -36,6 +37,18 @@ module Mongo
       # @since 2.0.0
       def get_last_error
         NOOP
+      end
+
+      # Get a human-readable string representation of an unacknowledged write concern.
+      #
+      # @example Inspect the write concern.
+      #   write_concern.inspect
+      #
+      # @return [ String ] A string representation of an unacknowledged write concern.
+      #
+      # @since 2.0.0
+      def inspect
+        "<Mongo::WriteConcern::Unacknowledged:0x#{object_id} options=#{options}>"
       end
     end
   end

@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -71,8 +71,6 @@ module Mongo
     #     ...
     #   end
     #
-    # @yield param [Hash] Each matching document.
-    #
     # @return [ Enumerator ] The enumerator.
     #
     # @since 2.0.0
@@ -103,7 +101,7 @@ module Mongo
         :to_return => to_return,
         :cursor_id => @cursor_id,
         :db_name   => database.name,
-        :coll_name => collection.name
+        :coll_name => @coll_name || collection.name
       })
     end
 
@@ -126,6 +124,7 @@ module Mongo
     def process(result)
       @remaining -= result.returned_count if limited?
       @cursor_id = result.cursor_id
+      @coll_name ||= result.namespace.sub("#{database.name}.", '') if result.namespace
       result.documents
     end
 

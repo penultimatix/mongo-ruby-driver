@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -40,7 +40,7 @@ module Mongo
       #                                                  :limit => 10)
       #
       # @example Find all users with slave ok bit set
-      #   Query.new('xgen', 'users', {:name => 'Tyler', :flags => [:slave_ok]})
+      #   Query.new('xgen', 'users', {:name => 'Tyler'}, :flags => [:slave_ok])
       #
       # @example Find all user ids.
       #   Query.new('xgen', 'users', {}, :fields => {:id => 1})
@@ -64,6 +64,27 @@ module Mongo
         @skip        = options[:skip]  || 0
         @limit       = options[:limit] || 0
         @flags       = options[:flags] || []
+      end
+
+      # The log message for a query operation.
+      #
+      # @example Get the log message.
+      #   query.log_message
+      #
+      # @return [ String ] The log message
+      #
+      # @since 2.0.0
+      def log_message
+        fields = []
+        fields << ["%s |", "QUERY"]
+        fields << ["namespace=%s", namespace]
+        fields << ["selector=%s", selector.inspect]
+        fields << ["flags=%s", flags.inspect]
+        fields << ["limit=%s", limit.inspect]
+        fields << ["skip=%s", skip.inspect]
+        fields << ["project=%s", project.inspect]
+        f, v = fields.transpose
+        f.join(" ") % v
       end
 
       # Query messages require replies from the database.

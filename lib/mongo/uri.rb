@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the 'License');
 # you may not use this file except in compliance with the License.
@@ -24,18 +24,100 @@ module Mongo
   #   client = Client.new(uri.server, uri.options)
   #   client.login(uri.credentials)
   #   client[uri.database]
+  #
+  # @since 2.0.0
   class URI
+
+    # Scheme Regex: non-capturing, matches scheme.
+    #
+    # @since 2.0.0
+    SCHEME = %r{(?:mongodb://)}.freeze
+
+    # User Regex: capturing, group 1, matches anything but ':'
+    #
+    # @since 2.0.0
+    USER = /([^:]+)/.freeze
+
+    # Password Regex: capturing, group 2, matches anything but '@'
+    #
+    # @since 2.0.0
+    PASSWORD = /([^@]+)/.freeze
+
+    # Credentials Regex: non capturing, matches 'user:password@'
+    #
+    # @since 2.0.0
+    CREDENTIALS = /(?:#{USER}:#{PASSWORD}?@)?/.freeze
+
+    # Host and port server Regex: matches anything but a forward slash
+    #
+    # @since 2.0.0
+    HOSTPORT = /[^\/]+/.freeze
+
+    # Unix socket server Regex: matches unix socket server
+    #
+    # @since 2.0.0
+    UNIX = /\/.+.sock?/.freeze
+
+    # server Regex: capturing, matches host and port server or unix server
+    #
+    # @since 2.0.0
+    SERVERS = /((?:(?:#{HOSTPORT}|#{UNIX}),?)+)/.freeze
+
+    # Database Regex: matches anything but the characters that cannot
+    # be part of any MongoDB database name.
+    #
+    # @since 2.0.0
+    DATABASE = %r{(?:/([^/\.\ "*<>:\|\?]*))?}.freeze
+
+    # Option Regex: notably only matches the ampersand separator and does
+    # not allow for semicolon to be used to separate options.
+    #
+    # @since 2.0.0
+    OPTIONS = /(?:\?(?:(.+=.+)&?)+)*/.freeze
+
+    # Complete URI Regex: matches all of the combined components
+    #
+    # @since 2.0.0
+    URI = /#{SCHEME}#{CREDENTIALS}#{SERVERS}#{DATABASE}#{OPTIONS}/.freeze
+
+    # MongoDB URI (connection string) documentation url
+    #
+    # @since 2.0.0
+    HELP = 'http://docs.mongodb.org/manual/reference/connection-string/'.freeze
+
+    # Map of URI read preference modes to ruby driver read preference modes
+    #
+    # @since 2.0.0
+    READ_MODE_MAP = {
+      'primary'            => :primary,
+      'primaryPreferred'   => :primary_preferred,
+      'secondary'          => :secondary,
+      'secondaryPreferred' => :secondary_preferred,
+      'nearest'            => :nearest
+    }.freeze
+
+    # Map of URI authentication mechanisms to ruby driver mechanisms
+    #
+    # @since 2.0.0
+    AUTH_MECH_MAP = {
+      'PLAIN'      => :plain,
+      'MONGODB-CR' => :mongodb_cr,
+      'GSSAPI'     => :gssapi
+    }.freeze
 
     # Create the new uri from the provided string.
     #
     # @example Create the new URI.
     #   URI.new('mongodb://localhost:27017')
     #
-    # @param string [String] The uri string.
-    # @raise [BadURI] If the uri does not match the spec.
+    # @param [ String ] string The uri string.
+    #
+    # @raise [ BadURI ] If the uri does not match the spec.
+    #
+    # @since 2.0.0
     def initialize(string)
       @match = string.match(URI)
-      raise BadURI.new(string) unless @match
+      raise Invalid.new(string) unless @match
     end
 
     # Get the servers provided in the URI.
@@ -43,7 +125,9 @@ module Mongo
     # @example Get the servers.
     #   uri.servers
     #
-    # @return [Array<String>] The servers.
+    # @return [ Array<String> ] The servers.
+    #
+    # @since 2.0.0
     def servers
       @match[3].split(',')
     end
@@ -68,9 +152,11 @@ module Mongo
     # @example Get the credentials.
     #   uri.credentials
     #
-    # @return [Hash] The credentials.
-    #   * :user [String] The user.
-    #   * :password [String] The provided password.
+    # @return [ Hash ] The credentials.
+    #   * :user [ String ] The user.
+    #   * :password [ String ] The provided password.
+    #
+    # @since 2.0.0
     def credentials
       { :user => user, :password => password }
     end
@@ -81,8 +167,10 @@ module Mongo
     #   uri.database
     #
     # @return [String] The database.
+    #
+    # @since 2.0.0
     def database
-      @match[4]
+      @match[4].nil? ? Database::ADMIN : @match[4]
     end
 
     # Get the options provided in the URI.
@@ -106,13 +194,16 @@ module Mongo
     #
     #   Read Options (returned in a hash under the :read key)
     #   * :mode [Symbol]  read mode
-    #   * :tags [Array<Hash>] read tag sets
+    #   * :tag_sets [Array<Hash>] read tag sets
+    #
+    # @since 2.0.0
     def options
       parsed_options = @match[5]
       return {} unless parsed_options
       parsed_options.split('&').reduce({}) do |options, option|
         key, value = option.split('=')
         strategy = OPTION_MAP[key]
+        raise InvalidOption.new(key) if strategy.nil?
         add_option(strategy, value, options)
         options
       end
@@ -120,68 +211,58 @@ module Mongo
 
     # Exception that is raised when trying to parse a URI that does not match
     # the specification.
-    class BadURI < RuntimeError
+    #
+    # @since 2.0.0
+    class Invalid < RuntimeError
+
+      # MongoDB URI format specification.
+      #
+      # @since 2.0.0
+      FORMAT = 'mongodb://[username:password@]host1[:port1][,host2[:port2]' +
+        ',...[,hostN[:portN]]][/[database][?options]]'.freeze
 
       # Creates a new instance of the BadURI error.
       #
-      # @param uri [String] The bad URI.
+      # @example Initialize the error.
+      #   BadURI.new(uri)
+      #
+      # @param [ String ] uri The bad URI.
+      #
+      # @since 2.0.0
       def initialize(uri)
         super(message(uri))
       end
 
       private
 
-      # MongoDB URI format specification
-      FORMAT = 'mongodb://[username:password@]host1[:port1][,host2[:port2]' +
-        ',...[,hostN[:portN]]][/[database][?options]]'
-
-      # MongoDB URI (connection string) documentation url
-      URL = 'http://docs.mongodb.org/manual/reference/connection-string/'
-
-      # Creates a BadURI message
-      #
-      # @param uri [String] The bad uri.
-      # @return [String] The bad uri message.
       def message(uri)
         "MongoDB URI must be in the following format: #{FORMAT}\n" +
-        "Please see the following URL for more information: #{URL}\n" +
+        "Please see the following URL for more information: #{HELP}\n" +
         "Bad URI: #{uri}"
       end
     end
 
+    # Raised if the URI is in the correct format but an option is provided that
+    # is not recognized.
+    #
+    # @since 2.0.0
+    class InvalidOption < RuntimeError
+
+      # Create the error.
+      #
+      # @example Create the error with the invalid option name.
+      #   InvalidOption.new('nothing')
+      #
+      # @param [ String ] name The invalid option name.
+      #
+      # @since 2.0.0
+      def initialize(name)
+        super("Invalid option in URI: '#{name}'.\n" +
+          "Please see the following URL for more information: #{HELP}\n")
+      end
+    end
+
     private
-
-    # Scheme Regex: non-capturing, matches scheme
-    SCHEME = %r{(?:mongodb://)}
-
-    # User Regex: capturing, group 1, matches anything but ':'
-    USER = /([^:]+)/
-
-    # Password Regex: capturing, group 2, matches anything but '@'
-    PASSWORD = /([^@]+)/
-
-    # Credentials Regex: non capturing, matches 'user:password@'
-    CREDENTIALS = /(?:#{USER}:#{PASSWORD}?@)?/
-
-    # Host and port server Regex: matches anything but a forward slash
-    HOSTPORT = /[^\/]+/
-
-    # Unix socket server Regex: matches unix socket server
-    UNIX = /\/.+.sock?/
-
-    # server Regex: capturing, matches host and port server or unix server
-    SERVERS = /((?:(?:#{HOSTPORT}|#{UNIX}),?)+)/
-
-    # Database Regex: matches anything but the characters that cannot
-    # be part of any MongoDB database name.
-    DATABASE = %r{(?:/([^/\.\ "*<>:\|\?]*))?}
-
-    # Option Regex: notably only matches the ampersand separator and does
-    # not allow for semicolon to be used to separate options.
-    OPTIONS = /(?:\?(?:(.+=.+)&?)+)*/
-
-    # Complete URI Regex: matches all of the combined components
-    URI = /#{SCHEME}#{CREDENTIALS}#{SERVERS}#{DATABASE}#{OPTIONS}/
 
     # Hash for storing map of URI option parameters to conversion strategies
     OPTION_MAP = {}
@@ -201,8 +282,10 @@ module Mongo
     option 'replicaSet', :replica_set, :type => :replica_set
 
     # Timeout Options
-    option 'connectTimeoutMS', :connect_timeout
-    option 'socketTimeoutMS', :socket_timeout
+    option 'connectTimeoutMS', :connect_timeout, :type => :ms_convert
+    option 'socketTimeoutMS', :socket_timeout, :type => :ms_convert
+    option 'serverSelectionTimeoutMS', :server_selection_timeout, :type => :ms_convert
+    option 'localThresholdMS', :local_threshold, :type => :ms_convert
 
     # Write Options
     option 'w', :w, :group => :write
@@ -212,30 +295,24 @@ module Mongo
 
     # Read Options
     option 'readPreference', :mode, :group => :read, :type => :read_mode
-    option 'readPreferenceTags', :tags, :group => :read, :type => :read_tags
+    option 'readPreferenceTags', :tag_sets, :group => :read, :type => :read_tags
+
+    # Pool options
+    option 'minPoolSize', :min_pool_size
+    option 'maxPoolSize', :max_pool_size
+    option 'waitQueueTimeoutMS', :wait_queue_timeout, :type => :ms_convert
 
     # Security Options
     option 'ssl', :ssl
 
+    # Topology options
+    option 'connect', :connect
+
     # Auth Options
     option 'authSource', :source, :group => :auth, :type => :auth_source
     option 'authMechanism', :mechanism, :group => :auth, :type => :auth_mech
-
-    # Map of URI read preference modes to ruby driver read preference modes
-    READ_MODE_MAP = {
-      'primary'            => :primary,
-      'primaryPreferred'   => :primary_preferred,
-      'secondary'          => :secondary,
-      'secondaryPreferred' => :secondary_preferred,
-      'nearest'            => :nearest
-    }.freeze
-
-    # Map of URI authentication mechanisms to ruby driver mechanisms
-    AUTH_MECH_MAP = {
-      'PLAIN'      => :plain,
-      'MONGODB-CR' => :mongodb_cr,
-      'GSSAPI'     => :gssapi
-    }.freeze
+    option 'authMechanismProperties', :auth_mech_properties, :group => :auth,
+           :type => :auth_mech_props
 
     # Gets the user provided in the URI
     #
@@ -382,9 +459,45 @@ module Mongo
     #
     # @return [Hash] The tag set hash.
     def read_set(value)
+      hash_extractor(value)
+    end
+
+    # Auth mechanism properties extractor.
+    #
+    # @param value [ String ] The auth mechanism properties string.
+    #
+    # @return [ Hash ] The auth mechanism properties hash.
+    def auth_mech_props(value)
+      properties = hash_extractor(value)
+      if properties[:canonicalize_host_name]
+        properties.merge!(canonicalize_host_name:
+                            properties[:canonicalize_host_name] == 'true')
+      end
+      properties
+    end
+
+    # Ruby's convention is to provide timeouts in seconds, not milliseconds and
+    # to use fractions where more precision is necessary. The connection string
+    # options are always in MS so we provide an easy conversion type.
+    #
+    # @param [ Integer ] value The millisecond value.
+    #
+    # @return [ Float ] The seconds value.
+    #
+    # @since 2.0.0
+    def ms_convert(value)
+      value.to_f / 1000
+    end
+
+    # Extract values from the string and put them into a nested hash.
+    #
+    # @param value [ String ] The string to build a hash from.
+    #
+    # @return [ Hash ] The hash built from the string.
+    def hash_extractor(value)
       value.split(',').reduce({}) do |set, tag|
         k, v = tag.split(':')
-        set.merge(k.to_sym => v)
+        set.merge(k.downcase.to_sym => v)
       end
     end
   end

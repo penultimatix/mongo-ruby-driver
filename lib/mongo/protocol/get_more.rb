@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -40,6 +40,24 @@ module Mongo
         @namespace = "#{database}.#{collection}"
         @number_to_return = number_to_return
         @cursor_id = cursor_id
+      end
+
+      # The log message for a get more operation.
+      #
+      # @example Get the log message.
+      #   get_more.log_message
+      #
+      # @return [ String ] The log message
+      #
+      # @since 2.0.0
+      def log_message
+        fields = []
+        fields << ["%s |", "GETMORE"]
+        fields << ["namespace=%s", namespace]
+        fields << ["number_to_return=%s", number_to_return]
+        fields << ["cursor_id=%s", cursor_id]
+        f, v = fields.transpose
+        f.join(" ") % v
       end
 
       # Get more messages require replies from the database.

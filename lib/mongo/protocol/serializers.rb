@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -150,8 +150,12 @@ module Mongo
         # @param buffer [String] Buffer to receive the BSON encoded document.
         # @param value [Hash] Document to serialize as BSON.
         # @return [String] Buffer with serialized value.
-        def self.serialize(buffer, value)
+        def self.serialize(buffer, value, max_bson_size = nil)
+          start_size = buffer.size
           value.to_bson(buffer)
+          if max_bson_size && buffer.size - start_size > max_bson_size
+            raise Error::MaxBSONSize.new(max_bson_size)
+          end
         end
 
         # Deserializes a document from the IO stream
@@ -160,6 +164,15 @@ module Mongo
         # @return [Hash] The decoded BSON document.
         def self.deserialize(io)
           BSON::Document.from_bson(io)
+        end
+
+        # Whether there can be a size limit on this type after serialization.
+        #
+        # @return [ true ] Documents can be size limited upon serialization.
+        #
+        # @since 2.0.0
+        def self.size_limited?
+          true
         end
       end
     end

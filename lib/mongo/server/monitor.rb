@@ -1,4 +1,4 @@
-# Copyright (C) 2009 - 2014 MongoDB Inc.
+# Copyright (C) 2014-2015 MongoDB Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+require 'mongo/server/monitor/connection'
+
 module Mongo
   class Server
 
@@ -22,10 +24,10 @@ module Mongo
     class Monitor
       include Loggable
 
-      # The default time for a server to refresh its status is 10 seconds.
+      # The default time for a server to refresh its status is 500 ms.
       #
       # @since 2.0.0
-      HEARTBEAT_FREQUENCY = 10.freeze
+      HEARTBEAT_FREQUENCY = 0.5.freeze
 
       # The command used for determining server status.
       #
@@ -37,45 +39,53 @@ module Mongo
       # @since 2.0.0
       ISMASTER = Protocol::Query.new(Database::ADMIN, Database::COMMAND, STATUS, :limit => -1)
 
-      # @return [ Mongo::Server ] The server the monitor refreshes.
-      attr_reader :server
-      # @return [ Hash ] options The server options.
-      attr_reader :options
+      # The weighting factor (alpha) for calculating the average moving round trip time.
+      #
+      # @since 2.0.0
+      RTT_WEIGHT_FACTOR = 0.2.freeze
+
       # @return [ Mongo::Connection ] connection The connection to use.
       attr_reader :connection
 
-      # Get the refresh interval for the server. This will be defined via an option
-      # or will default to 5.
+      # @return [ Server::Description ] description The server
+      #   description the monitor refreshes.
+      attr_reader :description
+
+      # @return [ Description::Inspector ] inspector The description inspector.
+      attr_reader :inspector
+
+      # @return [ Hash ] options The server options.
+      attr_reader :options
+
+      # Force the monitor to immediately do a check of its server.
       #
-      # @example Get the refresh interval.
-      #   server.heartbeat_frequency
+      # @example Force a scan.
+      #   monitor.scan!
       #
-      # @return [ Integer ] The heartbeat frequency, in seconds.
+      # @return [ Description ] The updated description.
       #
       # @since 2.0.0
-      def heartbeat_frequency
-        @heartbeat_frequency ||= options[:heartbeat_frequency] || HEARTBEAT_FREQUENCY
+      def scan!
+        @description = inspector.run(description, *ismaster)
       end
 
       # Create the new server monitor.
       #
       # @example Create the server monitor.
-      #   Mongo::Server::Monitor.new(server, 5)
+      #   Mongo::Server::Monitor.new(address, listeners)
       #
-      # @param [ Mongo::Server ] server The server to refresh.
-      # @param [ Integer ] interval The refresh interval in seconds.
+      # @param [ Address ] address The address to monitor.
+      # @param [ Event::Listeners ] listeners The event listeners.
+      # @param [ Hash ] options The options.
       #
       # @since 2.0.0
-      def initialize(server, options = {})
-        @server = server
+      def initialize(address, listeners, options = {})
+        @description = Description.new(address, {})
+        @inspector = Description::Inspector.new(listeners)
         @options = options.freeze
-
-        # @note We reject the user option here as the ismaster command should
-        # be able to run without being authorized.
-        @connection = Mongo::Connection.new(
-          server,
-          options.reject{ |key, value| key == :user }
-        )
+        @connection = Connection.new(address, options)
+        @last_round_trip_time = nil
+        @mutex = Mutex.new
       end
 
       # Runs the server monitor. Refreshing happens on a separate thread per
@@ -87,46 +97,49 @@ module Mongo
       # @return [ Thread ] The thread the monitor runs on.
       #
       # @since 2.0.0
-      def run
-        Monitor.threads[object_id] = Thread.new(heartbeat_frequency, server) do |i, s|
+      def run!
+        @thread = Thread.new(HEARTBEAT_FREQUENCY) do |i|
           loop do
             sleep(i)
-            server.description.update!(*ismaster)
+            scan!
           end
         end
       end
 
+      # Stops the server monitor. Kills the thread so it doesn't continue
+      # taking memory and sending commands to the connection.
+      #
+      # @example Stop the monitor.
+      #   monitor.stop!
+      #
+      # @return [ Boolean ] Is the Thread stopped?
+      #
+      # @since 2.0.0
+      def stop!
+        @thread.kill && @thread.stop?
+      end
+
       private
 
-      def calculate_round_trip_time(start)
-        Time.now - start
+      def average_round_trip_time(start)
+        new_rtt = Time.now - start
+        RTT_WEIGHT_FACTOR * new_rtt + (1 - RTT_WEIGHT_FACTOR) * (@last_round_trip_time || new_rtt)
+      end
+
+      def calculate_average_round_trip_time(start)
+        @last_round_trip_time = average_round_trip_time(start)
       end
 
       def ismaster
-        start = Time.now
-        begin
-          result = connection.dispatch([ ISMASTER ]).documents[0]
-          return result, calculate_round_trip_time(start)
-        rescue SystemCallError, IOError => e
-          log(:debug, 'MONGODB', [ e.message ])
-          return {}, calculate_round_trip_time(start)
-        end
-      end
-
-      class << self
-
-        # For the purposes of cleanup, we store all monitor threads in a global
-        # array to be able to shut them down on spec cleanup or GC when server
-        # is garbage collected.
-        #
-        # @example Get all the monitor threads.
-        #   Monitor.threads
-        #
-        # @return [ Hash<Integer, Thread> ] The monitor threads.
-        #
-        # @since 2.0.0
-        def threads
-          @threads ||= {}
+        @mutex.synchronize do
+          start = Time.now
+          begin
+            result = connection.dispatch([ ISMASTER ]).documents[0]
+            return result, calculate_average_round_trip_time(start)
+          rescue Exception => e
+            log_debug([ e.message ])
+            return {}, calculate_average_round_trip_time(start)
+          end
         end
       end
     end

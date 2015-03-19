@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -30,6 +30,12 @@ module Mongo
         def configure(field, value)
           return options[field] if value.nil?
           new(options.merge(field => value))
+        end
+
+        def configure_flag(flag)
+          new(options.dup).tap do |view|
+            view.send(:flags).push(flag)
+          end
         end
       end
     end

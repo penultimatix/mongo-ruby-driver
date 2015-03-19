@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -74,7 +74,8 @@ module Mongo
     #
     # @since 2.0.0
     def close
-      socket.close and true
+      socket.close rescue true
+      true
     end
 
     # Delegates gets to the underlying socket.
@@ -122,11 +123,13 @@ module Mongo
     #
     # @since 2.0.0
     def read(length)
-      data = handle_errors{ socket.read(length) } || String.new
-      if data.length < length
-        data << read(length - data.length)
+      handle_errors do
+        data = read_from_socket(length)
+        while data.length < length
+          data << read_from_socket(length - data.length)
+        end
+        data
       end
-      data
     end
 
     # Read a single byte from the socket.
@@ -157,15 +160,19 @@ module Mongo
 
     private
 
+    def read_from_socket(length)
+      socket.read(length) || String.new
+    end
+
     def handle_errors
       begin
         yield
       rescue Errno::ETIMEDOUT
-        raise Mongo::SocketTimeoutError, TIMEOUT_ERROR
+        raise Error::SocketTimeoutError, TIMEOUT_ERROR
       rescue IOError, SystemCallError => e
-        raise Mongo::SocketError, e.message
+        raise Error::SocketError, e.message
       rescue OpenSSL::SSL::SSLError
-        raise Mongo::SocketError, SSL_ERROR
+        raise Error::SocketError, SSL_ERROR
       end
     end
   end

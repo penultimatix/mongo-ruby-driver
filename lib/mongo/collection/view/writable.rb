@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,27 +21,88 @@ module Mongo
       # @since 2.0.0
       module Writable
 
+        # Finds a single document in the database via findAndModify and deletes
+        # it, returning the original document.
+        #
+        # @example Find one document and delete it.
+        #   view.find_one_and_delete
+        #
+        # @return [ BSON::Document, nil ] The document, if found.
+        #
+        # @since 2.0.0
+        def find_one_and_delete
+          cmd = { :findandmodify => collection.name, :query => selector, :remove => true }
+          cmd[:fields] = projection if projection
+          cmd[:sort] = sort if sort
+          database.command(cmd).first['value']
+        end
+
+        # Finds a single document and replace it.
+        #
+        # @example Find a document and replace it, returning the original.
+        #   view.find_one_and_replace({ name: 'test' }, :return_document => :before)
+        #
+        # @example Find a document and replace it, returning the new document.
+        #   view.find_one_and_replace({ name: 'test' }, :return_document => :after)
+        #
+        # @param [ BSON::Document ] replacement The updates.
+        # @param [ Hash ] opts The options.
+        #
+        # @option opts [ Symbol ] :return_document Either :before or :after.
+        # @option opts [ true, false ] :upsert Whether to upsert if the
+        #   document doesn't exist.
+        #
+        # @return [ BSON::Document ] The document.
+        #
+        # @since 2.0.0
+        def find_one_and_replace(replacement, opts = {})
+          find_one_and_update(replacement, opts)
+        end
+
+        # Finds a single document and updates it.
+        #
+        # @example Find a document and update it, returning the original.
+        #   view.find_one_and_update({ "$set" => { name: 'test' }}, :return_document => :before)
+        #
+        # @param [ BSON::Document ] document The updates.
+        # @param [ Hash ] opts The options.
+        #
+        # @option opts [ Symbol ] :return_document Either :before or :after.
+        #
+        # @return [ BSON::Document ] The document.
+        #
+        # @since 2.0.0
+        def find_one_and_update(document, opts = {})
+          cmd = { :findandmodify => collection.name, :query => selector }
+          cmd[:update] = document
+          cmd[:fields] = projection if projection
+          cmd[:sort] = sort if sort
+          cmd[:new] = (opts[:return_document] == :after ? true : false) if opts[:return_document]
+          cmd[:upsert] = opts[:upsert] if opts[:upsert]
+          database.command(cmd).first['value']
+        end
+
         # Remove documents from the collection.
         #
         # @example Remove multiple documents from the collection.
-        #   collection_view.remove_many
+        #   collection_view.delete_many
         #
         # @return [ Result ] The response from the database.
         #
         # @since 2.0.0
-        def remove_many
+        def delete_many
           remove(0)
         end
 
         # Remove a document from the collection.
         #
         # @example Remove a single document from the collection.
-        #   collection_view.remove_one
+        #   collection_view.delete_one
         #
         # @return [ Result ] The response from the database.
         #
         # @since 2.0.0
-        def remove_one
+        def delete_one
           remove(1)
         end
 

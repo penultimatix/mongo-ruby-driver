@@ -61,7 +61,7 @@ describe Mongo::Collection::View::Aggregation do
     end
 
     after do
-      authorized_collection.find.remove_many
+      authorized_collection.find.delete_many
     end
 
     context 'when a block is provided' do
@@ -106,6 +106,19 @@ describe Mongo::Collection::View::Aggregation do
 
       it 'returns an enumerated cursor' do
         expect(aggregation.each).to be_a(Enumerator)
+      end
+    end
+
+    context 'when an invalid pipeline operator is provided' do
+
+      let(:pipeline) do
+        [{ '$invalid' => 'operator' }]
+      end
+
+      it 'raises an OperationFailure' do
+        expect {
+          aggregation.to_a
+        }.to raise_error(Mongo::Error::OperationFailure)
       end
     end
   end

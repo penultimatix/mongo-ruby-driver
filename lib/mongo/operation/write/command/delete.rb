@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -42,10 +42,10 @@ module Mongo
           #
           # @since 2.0.0
           def selector
-            { :delete        => coll_name,
-              :deletes       => deletes,
-              :write_concern => write_concern.options,
-              :ordered       => ordered?
+            { delete: coll_name,
+              deletes: deletes,
+              writeConcern: write_concern.options,
+              ordered: ordered?
             }
           end
         end

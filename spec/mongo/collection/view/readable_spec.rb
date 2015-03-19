@@ -15,7 +15,22 @@ describe Mongo::Collection::View::Readable do
   end
 
   after do
-    authorized_collection.find.remove_many
+    authorized_collection.find.delete_many
+  end
+
+  describe '#allow_partial_results' do
+
+    let(:new_view) do
+      view.allow_partial_results
+    end
+
+    it 'sets the flag' do
+      expect(new_view.send(:flags)).to include(:partial)
+    end
+
+    it 'returns a new View' do
+      expect(new_view).not_to be(view)
+    end
   end
 
   describe '#aggregate' do
@@ -131,7 +146,7 @@ describe Mongo::Collection::View::Readable do
         expect(new_view.batch_size).to eq(new_batch_size)
       end
 
-      it 'returns a new Collection' do
+      it 'returns a new View' do
         expect(view.batch_size(new_batch_size)).not_to be(view)
       end
     end
@@ -161,7 +176,7 @@ describe Mongo::Collection::View::Readable do
         expect(new_view.comment).to eq(new_comment)
       end
 
-      it 'returns a new Collection' do
+      it 'returns a new View' do
         expect(view.comment(new_comment)).not_to be(view)
       end
     end
@@ -185,7 +200,7 @@ describe Mongo::Collection::View::Readable do
     end
 
     after do
-      authorized_collection.find.remove_many
+      authorized_collection.find.delete_many
     end
 
     context 'when a selector is provided' do
@@ -204,6 +219,10 @@ describe Mongo::Collection::View::Readable do
       it 'returns the count of matching documents' do
         expect(view.count).to eq(10)
       end
+    end
+
+    it 'takes a read preference option' do
+      expect(view.count(read: { mode: :secondary })).to eq(10)
     end
   end
 
@@ -300,6 +319,25 @@ describe Mongo::Collection::View::Readable do
         end
       end
     end
+
+    context 'when a read preference is specified' do
+
+      let(:documents) do
+        (1..3).map{ |i| { field: "test#{i}" }}
+      end
+
+      before do
+        authorized_collection.insert_many(documents)
+      end
+
+      let(:distinct) do
+        view.distinct(:field, read: { mode: :secondary })
+      end
+
+      it 'returns the distinct values' do
+        expect(distinct).to eq([ 'test1', 'test2', 'test3' ])
+      end
+    end
   end
 
   describe '#hint' do
@@ -319,7 +357,7 @@ describe Mongo::Collection::View::Readable do
         expect(new_view.hint).to eq(new_hint)
       end
 
-      it 'returns a new Collection' do
+      it 'returns a new View' do
         expect(view.hint(new_hint)).not_to be(view)
       end
     end
@@ -353,7 +391,7 @@ describe Mongo::Collection::View::Readable do
         expect(new_view.limit).to eq(new_limit)
       end
 
-      it 'returns a new Collection' do
+      it 'returns a new View' do
         expect(view.limit(new_limit)).not_to be(view)
       end
     end
@@ -381,6 +419,21 @@ describe Mongo::Collection::View::Readable do
     end
   end
 
+  describe '#no_cursor_timeout' do
+
+    let(:new_view) do
+      view.no_cursor_timeout
+    end
+
+    it 'sets the flag' do
+      expect(new_view.send(:flags)).to include(:no_cursor_timeout)
+    end
+
+    it 'returns a new View' do
+      expect(new_view).not_to be(view)
+    end
+  end
+
   describe '#projection' do
 
     context 'when projection are specified' do
@@ -398,7 +451,7 @@ describe Mongo::Collection::View::Readable do
         expect(new_view.projection).to eq(new_projection)
       end
 
-      it 'returns a new Collection' do
+      it 'returns a new View' do
         expect(view.projection(new_projection)).not_to be(view)
       end
     end
@@ -418,11 +471,11 @@ describe Mongo::Collection::View::Readable do
     context 'when a read pref is specified' do
 
       let(:options) do
-        { :read => Mongo::ServerPreference.get(:mode => :secondary) }
+        { :read => Mongo::ServerSelector.get(:mode => :secondary) }
       end
 
       let(:new_read) do
-        Mongo::ServerPreference.get(:mode => :secondary_preferred)
+        Mongo::ServerSelector.get(:mode => :secondary_preferred)
       end
 
       it 'sets the read preference' do
@@ -430,7 +483,7 @@ describe Mongo::Collection::View::Readable do
         expect(new_view.read).to eq(new_read)
       end
 
-      it 'returns a new Collection' do
+      it 'returns a new View' do
         expect(view.read(new_read)).not_to be(view)
       end
     end
@@ -438,7 +491,7 @@ describe Mongo::Collection::View::Readable do
     context 'when a read pref is not specified' do
 
       let(:options) do
-        { :read =>  Mongo::ServerPreference.get(:mode => :secondary) }
+        { :read =>  Mongo::ServerSelector.get(:mode => :secondary) }
       end
 
       it 'returns the read preference' do
@@ -452,7 +505,7 @@ describe Mongo::Collection::View::Readable do
         end
 
         it 'returns the collection read preference' do
-          expect(view.read).to eq(authorized_collection.server_preference)
+          expect(view.read).to eq(authorized_collection.read_preference)
         end
       end
     end
@@ -486,7 +539,7 @@ describe Mongo::Collection::View::Readable do
         expect(new_view.skip).to eq(new_skip)
       end
 
-      it 'returns a new Collection' do
+      it 'returns a new View' do
         expect(view.skip(new_skip)).not_to be(view)
       end
     end
@@ -531,7 +584,7 @@ describe Mongo::Collection::View::Readable do
         expect(new_view.sort).to eq(new_sort)
       end
 
-      it 'returns a new Collection' do
+      it 'returns a new View' do
         expect(view.sort(new_sort)).not_to be(view)
       end
     end

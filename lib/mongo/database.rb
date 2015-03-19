@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,6 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+require 'mongo/database/view'
 
 module Mongo
 
@@ -31,19 +33,30 @@ module Mongo
     # @since 2.0.0
     COMMAND = '$cmd'.freeze
 
+    # The default database options.
+    #
+    # @since 2.0.0
+    DEFAULT_OPTIONS = { :database => ADMIN }.freeze
+
     # The name of the collection that holds all the collection names.
     #
     # @since 2.0.0
     NAMESPACES = 'system.namespaces'.freeze
 
-    # @return [ Mongo::Client ] The database client.
+    # @return [ Client ] client The database client.
     attr_reader :client
 
-    # @return [ String ] The name of the collection.
+    # @return [ String ] name The name of the database.
     attr_reader :name
 
-    # Get cluser and server preference from client.
-    def_delegators :@client, :cluster, :server_preference, :write_concern
+    # @return [ Hash ] options The options.
+    attr_reader :options
+
+    # Get cluster, read preference, and write concern from client.
+    def_delegators :@client,
+                   :cluster,
+                   :read_preference,
+                   :write_concern
 
     # Check equality of the database object against another. Will simply check
     # if the names are the same.
@@ -85,14 +98,8 @@ module Mongo
     # @return [ Array<String> ] The names of all non-system collections.
     #
     # @since 2.0.0
-    def collection_names
-      namespaces = collection(NAMESPACES).find(
-        :name => { '$not' => /system\.|\$/ }
-      )
-      namespaces.map do |document|
-        collection = document['name']
-        collection[name.length + 1, collection.length]
-      end
+    def collection_names(options = {})
+      View.new(self).collection_names(options)
     end
 
     # Get all the collections that belong to this database.
@@ -113,14 +120,19 @@ module Mongo
     #   database.command(:ismaster => 1)
     #
     # @param [ Hash ] operation The command to execute.
+    # @param [ Hash ] opts The command options.
+    #
+    # @option opts :read [ Hash ] The read preference for this command.
     #
     # @return [ Hash ] The result of the command execution.
-    def command(operation)
-      server = client.server_preference.select_servers(cluster.servers).first
+    def command(operation, opts = {})
+      preference = opts[:read] ? ServerSelector.get(opts[:read], options) : read_preference
+      server = preference.select_server(cluster)
       Operation::Command.new({
         :selector => operation,
         :db_name => name,
-        :options => { :limit => -1 }
+        :options => { :limit => -1 },
+        :read => preference
       }).execute(server.context)
     end
 
@@ -143,14 +155,40 @@ module Mongo
     #
     # @param [ Mongo::Client ] client The driver client.
     # @param [ String, Symbol ] name The name of the database.
+    # @param [ Hash ] options The options.
     #
     # @raise [ Mongo::Database::InvalidName ] If the name is nil.
     #
     # @since 2.0.0
-    def initialize(client, name)
-      raise InvalidName.new unless name
+    def initialize(client, name, options = {})
+      raise Error::InvalidDatabaseName.new unless name
       @client = client
       @name = name.to_s.freeze
+      @options = options.freeze
+    end
+
+    # Get a pretty printed string inspection for the database.
+    #
+    # @example Inspect the database.
+    #   database.inspect
+    #
+    # @return [ String ] The database inspection.
+    #
+    # @since 2.0.0
+    def inspect
+      "<Mongo::Database:0x#{object_id} name=#{name}>"
+    end
+
+    # Get the Grid "filesystem" for this database.
+    #
+    # @example Get the GridFS.
+    #   database.fs
+    #
+    # @return [ Grid::FS ] The GridFS for the database.
+    #
+    # @since 2.0.0
+    def fs(options = {})
+      Grid::FS.new(self, options)
     end
 
     # Get the user view for this database.
@@ -165,26 +203,22 @@ module Mongo
       Auth::User::View.new(self)
     end
 
-    # Exception that is raised when trying to create a database with no name.
+    # Create a database for the provided client, for use when we don't want the
+    # client's original database instance to be the same.
+    #
+    # @api private
+    #
+    # @example Create a database for the client.
+    #   Database.create(client)
+    #
+    # @param [ Client ] client The client to create on.
+    #
+    # @return [ Database ] The database.
     #
     # @since 2.0.0
-    class InvalidName < DriverError
-
-      # The message is constant.
-      #
-      # @since 2.0.0
-      MESSAGE = 'nil is an invalid database name. ' +
-        'Please provide a string or symbol.'
-
-      # Instantiate the new exception.
-      #
-      # @example Instantiate the exception.
-      #   Mongo::Database::InvalidName.new
-      #
-      # @since 2.0.0
-      def initialize
-        super(MESSAGE)
-      end
+    def self.create(client)
+      database = Database.new(client, client.options[:database], client.options)
+      client.instance_variable_set(:@database, database)
     end
   end
 end

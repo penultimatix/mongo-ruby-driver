@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,6 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+require 'mongo/operation/bulk_update/result'
 
 module Mongo
   module Operation
@@ -44,7 +46,7 @@ module Mongo
       #   the query should be run.
       # @option spec :coll_name [ String ] The name of the collection on which
       #   the query should be run.
-      # @option spec :write_concern [ Mongo::WriteConcern::Mode ] The write concern.
+      # @option spec :write_concern [ Mongo::WriteConcern ] The write concern.
       # @option spec :ordered [ true, false ] Whether the operations should be
       #   executed in order.
       # @option spec :options [ Hash ] Options for the command, if it ends up being a
@@ -60,34 +62,57 @@ module Mongo
         # @example Execute the operation.
         #   operation.execute(context)
         #
-        # @params [ Mongo::Server::Context ] The context for this operation.
+        # @param [ Mongo::Server::Context ] context The context for this operation.
         #
         # @return [ Result ] The operation result.
         #
         # @since 2.0.0
         def execute(context)
-          if context.write_command_enabled?
+          if context.features.write_command_enabled?
             execute_write_command(context)
           else
             execute_message(context)
           end
         end
 
+        # Set the write concern on this operation.
+        #
+        # @example Set a write concern.
+        #   new_op = operation.write_concern(:w => 2)
+        #
+        # @param [ Hash ] wc The write concern.
+        #
+        # @since 2.0.0
+        def write_concern(wc = nil)
+          if wc
+            self.class.new(spec.merge(write_concern: WriteConcern.get(wc)))
+          else
+            spec[WRITE_CONCERN]
+          end
+        end
+
         private
 
         def execute_write_command(context)
-          Result.new(Command::Update.new(spec).execute(context)).validate!
+          Result.new(Command::Update.new(spec).execute(context))
         end
 
         def execute_message(context)
-          replies = messages(context).map do |m|
+          replies = messages.map do |m|
             context.with_connection do |connection|
-              result = Result.new(connection.dispatch([ m, gle ]))
-              result.validate! if ordered?
-              result.reply
+              result = LegacyResult.new(connection.dispatch([ m, gle ].compact))
+              if stop_sending?(result)
+                return result
+              else
+                result.reply
+              end
             end
           end
-          Result.new(replies).validate!
+          LegacyResult.new(replies.compact.empty? ? nil : replies)
+        end
+
+        def stop_sending?(result)
+          ordered? && !result.successful?
         end
 
         # @todo put this somewhere else
@@ -97,7 +122,7 @@ module Mongo
 
         def gle
           gle_message = ( ordered? && write_concern.get_last_error.nil? ) ?
-                           Mongo::WriteConcern::Mode.get(:w => 1).get_last_error :
+                           Mongo::WriteConcern.get(:w => 1).get_last_error :
                            write_concern.get_last_error
           if gle_message
             Protocol::Query.new(
@@ -111,13 +136,14 @@ module Mongo
 
         def initialize_copy(original)
           @spec = original.spec.dup
-          @spec[:updates] = original.spec[:updates].dup
+          @spec[UPDATES] = original.spec[UPDATES].dup
         end
 
-        def messages(context)
-          # @todo: break up into multiple messages depending on max_message_size
+        def messages
           updates.collect do |u|
-            opts = u[:multi] ? { :flags => [:multi_update] } : {}
+            opts = { :flags => [] }
+            opts[:flags] << :multi_update if !!u[:multi]
+            opts[:flags] << :upsert if !!u[:upsert]
             Protocol::Update.new(db_name, coll_name, u[:q], u[:u], opts)
           end
         end

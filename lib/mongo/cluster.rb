@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-require 'mongo/cluster/mode'
+require 'mongo/cluster/topology'
 
 module Mongo
 
@@ -21,22 +21,20 @@ module Mongo
   #
   # @since 2.0.0
   class Cluster
+    extend Forwardable
     include Event::Subscriber
     include Loggable
 
-    # Constant for the replica set name configuration option.
-    #
-    # @since 2.0.0
-    REPLICA_SET_NAME = :replica_set_name.freeze
-
-    # @return [ Mongo::Client ] The cluster's client.
-    attr_reader :client
     # @return [ Array<String> ] The provided seed addresses.
     attr_reader :addresses
+
     # @return [ Hash ] The options hash.
     attr_reader :options
-    # @return [ Object ] The cluster mode.
-    attr_reader :mode
+
+    # @return [ Object ] The cluster topology.
+    attr_reader :topology
+
+    def_delegators :topology, :replica_set?, :replica_set_name, :sharded?, :standalone?, :unknown?
 
     # Determine if this cluster of servers is equal to another object. Checks the
     # servers currently in the cluster, not what was configured.
@@ -51,7 +49,7 @@ module Mongo
     # @since 2.0.0
     def ==(other)
       return false unless other.is_a?(Cluster)
-      addresses == other.addresses
+      addresses == other.addresses && options == other.options
     end
 
     # Add a server to the cluster with the provided address. Useful in
@@ -61,16 +59,17 @@ module Mongo
     # @example Add the server for the address to the cluster.
     #   cluster.add('127.0.0.1:27018')
     #
-    # @param [ String ] address The address of the server to add.
+    # @param [ String ] host The address of the server to add.
     #
     # @return [ Server ] The newly added server, if not present already.
     #
     # @since 2.0.0
-    def add(address)
+    def add(host)
+      address = Address.new(host)
       unless addresses.include?(address)
-        log(:debug, 'MONGODB', [ "Adding #{address} to the cluster." ])
-        server = Server.new(address, options)
+        log_debug([ "Adding #{address.to_s} to the cluster." ])
         addresses.push(address)
+        server = Server.new(address, event_listeners, options)
         @servers.push(server)
         server
       end
@@ -81,21 +80,34 @@ module Mongo
     # @example Instantiate the cluster.
     #   Mongo::Cluster.new(["127.0.0.1:27017"])
     #
-    # @param [ Array<String> ] addresses The addresses of the configured servers.
+    # @param [ Array<String> ] seeds The addresses of the configured servers.
     # @param [ Hash ] options The options.
     #
     # @since 2.0.0
-    def initialize(client, addresses, options = {})
-      @client = client
-      @addresses = addresses
+    def initialize(seeds, options = {})
+      @addresses = []
+      @servers = []
+      @event_listeners = Event::Listeners.new
       @options = options.freeze
-      @mode = Mode.get(options)
-      @servers = addresses.map do |address|
-        Server.new(address, options).tap do |server|
-          subscribe_to(server, Event::SERVER_ADDED, Event::ServerAdded.new(self))
-          subscribe_to(server, Event::SERVER_REMOVED, Event::ServerRemoved.new(self))
-        end
-      end
+      @topology = Topology.initial(seeds, options)
+
+      subscribe_to(Event::SERVER_ADDED, Event::ServerAdded.new(self))
+      subscribe_to(Event::SERVER_REMOVED, Event::ServerRemoved.new(self))
+      subscribe_to(Event::PRIMARY_ELECTED, Event::PrimaryElected.new(self))
+
+      seeds.each{ |seed| add(seed) }
+    end
+
+    # Get the nicer formatted string for use in inspection.
+    #
+    # @example Inspect the cluster.
+    #   cluster.inspect
+    #
+    # @return [ String ] The cluster inspection.
+    #
+    # @since 2.0.0
+    def inspect
+      "#<Mongo::Cluster:0x#{object_id} servers=#{servers} topology=#{topology.display_name}>"
     end
 
     # Get the next primary server we can send an operation to.
@@ -107,7 +119,22 @@ module Mongo
     #
     # @since 2.0.0
     def next_primary
-      client.server_preference.primary(servers).first
+      ServerSelector.get({ mode: :primary }, options).select_server(self)
+    end
+
+    # Elect a primary server from the description that has just changed to a
+    # primary.
+    #
+    # @example Elect a primary server.
+    #   cluster.elect_primary!(description)
+    #
+    # @param [ Server::Description ] description The newly elected primary.
+    #
+    # @return [ Topology ] The cluster topology.
+    #
+    # @since 2.0.0
+    def elect_primary!(description)
+      @topology = topology.elect_primary(description, @servers)
     end
 
     # Removed the server from the cluster for the provided address, if it
@@ -116,25 +143,30 @@ module Mongo
     # @example Remove the server from the cluster.
     #   server.remove('127.0.0.1:27017')
     #
-    # @param [ String ] address The host/port or socket address.
+    # @param [ String ] host The host/port or socket address.
     #
     # @since 2.0.0
-    def remove(address)
-      removed_servers = @servers.reject!{ |server| server.address.seed == address }
+    def remove(host)
+      log_debug([ "#{host} being removed from the cluster." ])
+      address = Address.new(host)
+      removed_servers = @servers.reject!{ |server| server.address == address }
       removed_servers.each{ |server| server.disconnect! } if removed_servers
       addresses.reject!{ |addr| addr == address }
     end
 
-    # Get the replica set name configured for this cluster.
+    # Force a scan of all known servers in the cluster.
     #
-    # @example Get the replica set name.
-    #   cluster.replica_set_name
+    # @example Force a full cluster scan.
+    #   cluster.scan!
     #
-    # @return [ String ] The name of the configured replica set.
+    # @note This operation is done synchronously. If servers in the cluster are
+    #   down or slow to respond this can potentially be a slow operation.
+    #
+    # @return [ true ] Always true.
     #
     # @since 2.0.0
-    def replica_set_name
-      options[REPLICA_SET_NAME]
+    def scan!
+      @servers.each{ |server| server.scan! } and true
     end
 
     # Get a list of server candidates from the cluster that can have operations
@@ -147,19 +179,25 @@ module Mongo
     #
     # @since 2.0.0
     def servers
-      mode.servers(@servers, replica_set_name)
+      topology.servers(@servers)
     end
 
-    # Is this cluster part of a sharded (mongos) cluster?
+    # Create a cluster for the provided client, for use when we don't want the
+    # client's original cluster instance to be the same.
     #
-    # @example Is the cluster a sharded cluster?
-    #   cluster.sharded?
+    # @api private
     #
-    # @return [ true, false ] If the cluster is sharded.
+    # @example Create a cluster for the client.
+    #   Cluster.create(client)
+    #
+    # @param [ Client ] client The client to create on.
+    #
+    # @return [ Cluster ] The cluster.
     #
     # @since 2.0.0
-    def sharded?
-      mode == Mode::Sharded
+    def self.create(client)
+      cluster = Cluster.new(client.cluster.addresses.map(&:to_s), client.options)
+      client.instance_variable_set(:@cluster, cluster)
     end
   end
 end

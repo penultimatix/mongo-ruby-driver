@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,20 +20,8 @@ module Mongo
     # @since 2.0.0
     module Publisher
 
-      # Add an event listener for the provided event.
-      #
-      # @example Add an event listener
-      #   publisher.add_listener("my_event", listener)
-      #
-      # @param [ String ] event The event to listen for.
-      # @param [ Object ] listener The event listener.
-      #
-      # @return [ Array<Object> ] The listeners for the event.
-      #
-      # @since 2.0.0
-      def add_listener(event, listener)
-        listeners_for(event).push(listener)
-      end
+      # @return [ Event::Listeners ] event_listeners The listeners.
+      attr_reader :event_listeners
 
       # Publish the provided event.
       #
@@ -45,33 +33,9 @@ module Mongo
       #
       # @since 2.0.0
       def publish(event, *args)
-        listeners_for(event).each { |listener| listener.handle(*args) }
-      end
-
-      # Get all the listeners for the publisher.
-      #
-      # @example Get all the listeners.
-      #   publisher.listeners
-      #
-      # @return [ Hash<String, Array> ] The listeners.
-      #
-      # @since 2.0.0
-      def listeners
-        @listeners ||= {}
-      end
-
-      # Get the listeners for a specific event.
-      #
-      # @example Get the listeners.
-      #   publisher.listeners_for("test")
-      #
-      # @param [ String ] event The event name.
-      #
-      # @return [ Array<Object> ] The listeners.
-      #
-      # @since 2.0.0
-      def listeners_for(event)
-        listeners[event] ||= []
+        event_listeners.listeners_for(event).each do |listener|
+          listener.handle(*args)
+        end
       end
     end
   end

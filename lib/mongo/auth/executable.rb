@@ -1,4 +1,4 @@
-# Copyright (C) 2009 - 2014 MongoDB Inc.
+# Copyright (C) 2014-2015 MongoDB Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -39,13 +39,12 @@ module Mongo
 
       # If we are on MongoDB 2.6 and higher, we *always* authorize against the
       # admin database. Otherwise for 2.4 and lower we authorize against the
-      # database provided, or the optional auth_source option. The logic for
-      # that is encapsulated in the User class.
+      # auth source provided. The logic for that is encapsulated in the User class.
       def auth_database(connection)
-        if connection.write_command_enabled?
+        if connection.features.write_command_enabled?
           Database::ADMIN
         else
-          user.database
+          user.auth_source
         end
       end
     end

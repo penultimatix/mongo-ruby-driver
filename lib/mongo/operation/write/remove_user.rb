@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -36,13 +36,13 @@ module Mongo
         # @example Execute the operation.
         #   operation.execute(context)
         #
-        # @params [ Mongo::Server::Context ] The context for this operation.
+        # @param [ Mongo::Server::Context ] context The context for this operation.
         #
         # @return [ Result ] The operation result.
         #
         # @since 2.0.0
         def execute(context)
-          if context.write_command_enabled?
+          if context.features.write_command_enabled?
             execute_write_command(context)
           else
             execute_message(context)

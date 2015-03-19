@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,18 +20,20 @@ module Mongo
     # @since 2.0.0
     module Subscriber
 
-      # Subscribe to the provided publisher's event.
+      # @return [ Event::Listeners ] event_listeners The listeners.
+      attr_reader :event_listeners
+
+      # Subscribe to the provided event.
       #
       # @example Subscribe to the event.
-      #   subscriber.subscribe_to(publisher, 'test', listener)
+      #   subscriber.subscribe_to('test', listener)
       #
-      # @param [ Mongo::Event::Publisher ] publisher The publisher.
       # @param [ String ] event The event.
       # @param [ Object ] listener The event listener.
       #
       # @since 2.0.0
-      def subscribe_to(publisher, event, listener)
-        publisher.add_listener(event, listener)
+      def subscribe_to(event, listener)
+        event_listeners.add_listener(event, listener)
       end
     end
   end

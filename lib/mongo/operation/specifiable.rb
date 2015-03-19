@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -46,6 +46,11 @@ module Mongo
       # @since 2.0.0
       COLL_NAME = :coll_name.freeze
 
+      # The field for cursor count.
+      #
+      # @since 2.0.0
+      CURSOR_COUNT = :cursor_count.freeze
+
       # The field for cursor id.
       #
       # @since 2.0.0
@@ -56,10 +61,15 @@ module Mongo
       # @since 2.0.0
       CURSOR_IDS = :cursor_ids.freeze
 
-      # The field for indexes.
+      # The field for an index.
       #
       # @since 2.0.0
       INDEX = :index.freeze
+
+      # The field for multiple indexes.
+      #
+      # @since 2.0.0
+      INDEXES = :indexes.freeze
 
       # The field for index names.
       #
@@ -106,6 +116,11 @@ module Mongo
       # @since 2.0.0
       WRITE_CONCERN = :write_concern.freeze
 
+      # The field name for the read preference.
+      #
+      # @since 2.0.0
+      READ = :read.freeze
+
       # @return [ Hash ] spec The specification for the operation.
       attr_reader :spec
 
@@ -124,6 +139,18 @@ module Mongo
         spec == other.spec
       end
       alias_method :eql?, :==
+
+      # Get the cursor count from the spec.
+      #
+      # @example Get the cursor count.
+      #   specifiable.cursor_count
+      #
+      # @return [ Integer ] The cursor count.
+      #
+      # @since 2.0.0
+      def cursor_count
+        spec[CURSOR_COUNT]
+      end
 
       # The name of the database to which the operation should be sent.
       #
@@ -233,6 +260,18 @@ module Mongo
         spec[INDEX_NAME]
       end
 
+      # Get the indexes from the specification.
+      #
+      # @example Get the index specifications.
+      #   specifiable.indexes
+      #
+      # @return [ Hash ] The index specifications.
+      #
+      # @since 2.0.0
+      def indexes
+        spec[INDEXES]
+      end
+
       # Create the new specifiable operation.
       #
       # @example Create the new specifiable operation.
@@ -335,11 +374,23 @@ module Mongo
       # @example Get the write concern.
       #   specifiable.write_concern
       #
-      # @return [ Mongo::WriteConcern::Mode ] The write concern.
+      # @return [ Mongo::WriteConcern ] The write concern.
       #
       # @since 2.0.0
       def write_concern
-        @spec[WRITE_CONCERN] || WriteConcern::Mode.get(WriteConcern::Mode::DEFAULT)
+        @spec[WRITE_CONCERN] || WriteConcern.get(WriteConcern::DEFAULT)
+      end
+
+      # The read preference for this operation.
+      #
+      # @example Get the read preference.
+      #   specifiable.read
+      #
+      # @return [ Mongo::ServerSelector ] The read preference.
+      #
+      # @since 2.0.0
+      def read
+        @spec[READ] || ServerSelector.get
       end
     end
   end

@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,6 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+require 'mongo/operation/bulk_insert/result'
 
 module Mongo
   module Operation
@@ -36,7 +38,7 @@ module Mongo
       # @option spec :documents [ Array ] The documents to insert.
       # @option spec :db_name [ String ] The name of the database.
       # @option spec :coll_name [ String ] The name of the collection.
-      # @option spec :write_concern [ Mongo::WriteConcern::Mode ] The write concern.
+      # @option spec :write_concern [ Mongo::WriteConcern ] The write concern.
       # @option spec :ordered [ true, false ] Whether the operations should be
       #   executed in order.
       # @option spec :options [ Hash ] Options for the command, if it ends up being a
@@ -44,7 +46,6 @@ module Mongo
       #
       # @since 2.0.0
       class BulkInsert
-        include Executable
         include Specifiable
 
         # Execute the bulk insert operation.
@@ -52,13 +53,13 @@ module Mongo
         # @example Execute the operation.
         #   operation.execute(context)
         #
-        # @params [ Mongo::Server::Context ] The context for this operation.
+        # @param [ Mongo::Server::Context ] context The context for this operation.
         #
         # @return [ Result ] The operation result.
         #
         # @since 2.0.0
         def execute(context)
-          if context.write_command_enabled?
+          if context.features.write_command_enabled?
             execute_write_command(context)
           else
             execute_message(context)
@@ -68,18 +69,25 @@ module Mongo
         private
 
         def execute_write_command(context)
-          Result.new(Command::Insert.new(spec).execute(context)).validate!
+          Result.new(Command::Insert.new(spec).execute(context))
         end
 
         def execute_message(context)
-          replies = messages(context).map do |m|
+          replies = []
+          messages.map do |m|
             context.with_connection do |connection|
-              result = Result.new(connection.dispatch([ m, gle ]))
-              result.validate! if ordered?
-              result.reply
+              result = LegacyResult.new(connection.dispatch([ m, gle ].compact))
+              replies << result.reply
+              if stop_sending?(result)
+                return LegacyResult.new(replies)
+              end
             end
           end
-          Result.new(replies).validate!
+          LegacyResult.new(replies.compact.empty? ? nil : replies)
+        end
+
+        def stop_sending?(result)
+          ordered? && !result.successful?
         end
 
         # @todo put this somewhere else
@@ -87,9 +95,14 @@ module Mongo
           @spec.fetch(:ordered, true)
         end
 
+        def initialize_copy(original)
+          @spec = original.spec.dup
+          @spec[DOCUMENTS] = original.spec[DOCUMENTS].clone
+        end
+
         def gle
           gle_message = ( ordered? && write_concern.get_last_error.nil? ) ?
-                           Mongo::WriteConcern::Mode.get(:w => 1).get_last_error :
+                           Mongo::WriteConcern.get(:w => 1).get_last_error :
                            write_concern.get_last_error
           if gle_message
             Protocol::Query.new(
@@ -101,18 +114,12 @@ module Mongo
           end
         end
 
-        def initialize_copy(original)
-          @spec = original.spec.dup
-          @spec[:documents] = original.spec[:documents].dup
-        end
-
-        def messages(context)
-          if ordered?
+        def messages
+          if ordered? || gle
             documents.collect do |doc|
               Protocol::Insert.new(db_name, coll_name, [ doc ], options)
             end
           else
-            # @todo: break up into multiple messages depending on max_message_size
             [ Protocol::Insert.new(db_name, coll_name, documents, { :flags => [:continue_on_error] }) ]
           end
         end

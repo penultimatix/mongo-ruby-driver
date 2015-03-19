@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -42,7 +42,7 @@ module Mongo
         # @example Execute the operation.
         #   operation.execute(context)
         #
-        # @params [ Mongo::Server::Context ] The context for this operation.
+        # @param [ Mongo::Server::Context ] context The context for this operation.
         #
         # @return [ Result ] The result of the operation.
         #

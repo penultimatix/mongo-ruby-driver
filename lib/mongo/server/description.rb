@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the 'License');
 # you may not use this file except in compliance with the License.
@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-require 'mongo/server/description/inspection'
+require 'mongo/server/description/features'
+require 'mongo/server/description/inspector'
 
 module Mongo
   class Server
@@ -58,16 +59,6 @@ module Mongo
       # @since 2.0.0
       REPLICA_SET = 'isreplicaset'.freeze
 
-      # Static list of inspections that are performed on the result of an
-      # ismaster command in order to generate the appropriate events for the
-      # changes.
-      #
-      # @since 2.0.0
-      INSPECTIONS = [
-        Inspection::ServerAdded,
-        Inspection::ServerRemoved
-      ].freeze
-
       # Constant for reading max bson size info from config.
       #
       # @since 2.0.0
@@ -108,6 +99,11 @@ module Mongo
       # @since 2.0.0
       PASSIVE = 'passive'.freeze
 
+      # Constant for reading the passive server list.
+      #
+      # @since 2.0.0
+      PASSIVES = 'passives'.freeze
+
       # Constant for reading primary info from config.
       #
       # @since 2.0.0
@@ -123,22 +119,22 @@ module Mongo
       # @since 2.0.0
       SET_NAME = 'setName'.freeze
 
-      # The minimum version of the wire protocol to support write commands.
+      # Constant for reading tags info from config.
       #
       # @since 2.0.0
-      WRITE_COMMAND_WIRE_VERSION = 2.freeze
+      TAGS = 'tags'.freeze
 
-      # @return [ Hash ] The actual result from the isnamster command.
+      # @return [ Address ] address The server's address.
+      attr_reader :address
+
+      # @return [ Hash ] The actual result from the ismaster command.
       attr_reader :config
 
-      # @return [ Float ] The time the ismaster call took to complete.
-      attr_reader :round_trip_time
+      # @return [ Features ] features The features for the server.
+      attr_reader :features
 
-      # @return [ Mongo::Server ] server Needed to fire events.
-      attr_reader :server
-
-      # @return [ Symbol ] The type of server this description represents.
-      attr_accessor :server_type
+      # @return [ Float ] The moving average time the ismaster call took to complete.
+      attr_reader :average_round_trip_time
 
       # Will return true if the server is an arbiter.
       #
@@ -204,15 +200,31 @@ module Mongo
       # command.
       #
       # @example Instantiate the new description.
-      #   Description.new(result)
+      #   Description.new(address, { 'ismaster' => true }, 0.5)
       #
+      # @param [ Address ] address The server address.
       # @param [ Hash ] config The result of the ismaster command.
+      # @param [ Float ] average_round_trip_time The moving average time (ms) the ismaster
+      #   call took to complete.
       #
       # @since 2.0.0
-      def initialize(server, config = {}, round_trip_time = 0)
-        @server = server
+      def initialize(address, config = {}, average_round_trip_time = 0)
+        @address = address
         @config = config
-        @round_trip_time = round_trip_time
+        @features = Features.new(wire_versions)
+        @average_round_trip_time = average_round_trip_time
+      end
+
+      # Inspect the server description.
+      #
+      # @example Inspect the server description
+      #   description.inspect
+      #
+      # @return [ String ] The inspection.
+      #
+      # @since 2.0.0
+      def inspect
+        "#<Mongo::Server:Description:0x#{object_id} config=#{config} average_round_trip_time=#{average_round_trip_time}>"
       end
 
       # Get the max BSON object size for this server version.
@@ -242,7 +254,7 @@ module Mongo
       # Get the maximum batch size for writes.
       #
       # @example Get the max batch size.
-      #   config.max_write_batch_size
+      #   description.max_write_batch_size
       #
       # @return [ Integer ] The max batch size.
       #
@@ -254,7 +266,7 @@ module Mongo
       # Get the maximum wire version.
       #
       # @example Get the max wire version.
-      #   config.max_wire_version
+      #   description.max_wire_version
       #
       # @return [ Integer ] The max wire version supported.
       #
@@ -266,13 +278,25 @@ module Mongo
       # Get the minimum wire version.
       #
       # @example Get the min wire version.
-      #   config.min_wire_version
+      #   description.min_wire_version
       #
       # @return [ Integer ] The min wire version supported.
       #
       # @since 2.0.0
       def min_wire_version
         config[MIN_WIRE_VERSION] || LEGACY_WIRE_VERSION
+      end
+
+      # Get the tags configured for the server.
+      #
+      # @example Get the tags.
+      #   description.tags
+      #
+      # @return [ Hash ] The tags of the server.
+      #
+      # @since 2.0.0
+      def tags
+        config[TAGS] || {}
       end
 
       # Is the server a mongos?
@@ -287,6 +311,18 @@ module Mongo
         config[MESSAGE] == MONGOS_MESSAGE
       end
 
+      # Is the description of type other.
+      #
+      # @example Is the description of type other.
+      #   description.other?
+      #
+      # @return [ true, false ] If the description is other.
+      #
+      # @since 2.0.0
+      def other?
+        !primary? && !secondary? && !passive? && !arbiter?
+      end
+
       # Will return true if the server is passive.
       #
       # @example Is the server passive?
@@ -297,6 +333,18 @@ module Mongo
       # @since 2.0.0
       def passive?
         !!config[PASSIVE]
+      end
+
+      # Get a list of the passive servers in the cluster.
+      #
+      # @example Get the passives.
+      #   description.passives
+      #
+      # @return [ Array<String> ] The list of passives.
+      #
+      # @since 2.0.0
+      def passives
+        config[PASSIVES] || []
       end
 
       # Will return true if the server is a primary.
@@ -322,6 +370,18 @@ module Mongo
       # @since 2.0.0
       def replica_set_name
         config[SET_NAME]
+      end
+
+      # Get a list of all servers known to the cluster.
+      #
+      # @example Get all servers.
+      #   description.servers
+      #
+      # @return [ Array<String> ] The list of all servers.
+      #
+      # @since 2.0.0
+      def servers
+        hosts + arbiters + passives
       end
 
       # Will return true if the server is a secondary.
@@ -357,42 +417,33 @@ module Mongo
       #
       # @since 2.0.0
       def unknown?
-        config.empty?
+        config.empty? || config[Operation::Result::OK] != 1
       end
 
-      # Update this description with a new description. Will fire the
-      # necessary events depending on what has changed from the old description
-      # to the new one.
+      # A result from another server's ismaster command before this server has
+      # refreshed causes the need for this description to become unknown before
+      # the next refresh.
       #
-      # @example Update the description with the new config.
-      #   description.update!({ "ismaster" => false })
+      # @example Force an unknown state.
+      #   description.unknown!
       #
-      # @note This modifies the state of the description.
-      #
-      # @param [ Hash ] new_config The new configuration.
-      #
-      # @return [ Description ] The updated description.
+      # @return [ true ] Always true.
       #
       # @since 2.0.0
-      def update!(new_config, round_trip_time)
-        INSPECTIONS.each do |inspection|
-          inspection.run(self, Description.new(server, new_config))
-        end
-        @config = new_config
-        @round_trip_time = round_trip_time
-        self
+      def unknown!
+        @config = {} and true
       end
 
-      # Is the server able to perform write commands.
+      # Get the range of supported wire versions for the server.
       #
-      # @example Is the server write command enabled?
-      #   description.write_command_enabled?
+      # @example Get the wire version range.
+      #   description.wire_versions
       #
-      # @return [ true, false ] If the server is write command enabled.
+      # @return [ Range ] The wire version range.
       #
       # @since 2.0.0
-      def write_command_enabled?
-        max_wire_version >= WRITE_COMMAND_WIRE_VERSION
+      def wire_versions
+        min_wire_version..max_wire_version
       end
     end
   end

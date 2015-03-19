@@ -1,6 +1,7 @@
 require 'spec_helper'
 
 describe Mongo::Operation::Write::BulkUpdate do
+  include_context 'operation'
 
   let(:documents) do
     [{ :q => { :foo => 1 },
@@ -10,11 +11,11 @@ describe Mongo::Operation::Write::BulkUpdate do
   end
 
   let(:spec) do
-    { :updates       => documents,
-      :db_name       => TEST_DB,
-      :coll_name     => TEST_COLL,
-      :write_concern => Mongo::WriteConcern::Mode.get(:w => 1),
-      :ordered       => true
+    { updates: documents,
+      db_name: db_name,
+      coll_name: coll_name,
+      write_concern: write_concern,
+      ordered: true
     }
   end
 
@@ -54,11 +55,11 @@ describe Mongo::Operation::Write::BulkUpdate do
         end
 
         let(:other_spec) do
-          { :updates       => other_docs,
-            :db_name       => TEST_DB,
-            :coll_name     => TEST_COLL,
-            :write_concern => Mongo::WriteConcern::Mode.get(:w => 1),
-            :ordered       => true
+          { updates: other_docs,
+            db_name: db_name,
+            coll_name: coll_name,
+            write_concern: write_concern,
+            ordered: true
           }
         end
 
@@ -92,45 +93,20 @@ describe Mongo::Operation::Write::BulkUpdate do
     end
 
     after do
-      authorized_collection.find.remove_many
+      authorized_collection.find.delete_many
     end
 
     context 'when updating a single document' do
 
-      let(:update) do
-        described_class.new({
-          updates: documents,
-          db_name: TEST_DB,
-          coll_name: TEST_COLL,
-          write_concern: Mongo::WriteConcern::Mode.get(:w => 1)
-        })
-      end
-
       context 'when the update passes' do
 
         let(:documents) do
-          [{ q: { name: 'test' }, u: { '$set' => { field: 'blah' }}, limit: 1 }]
-        end
-
-        let(:result) do
-          op.execute(authorized_primary.context)
+          [{ q: { other: 'test' }, u: { '$set' => { field: 'blah' }}, multi: false }]
         end
 
         it 'updates the document' do
-          expect(result.written_count).to eq(1)
-        end
-      end
-
-      context 'when the update fails' do
-
-        let(:documents) do
-          [{ q: { name: 'test' }, u: { '$st' => { field: 'blah' }}}]
-        end
-
-        it 'raises an exception' do
-          expect {
-            op.execute(authorized_primary.context)
-          }.to raise_error(Mongo::Operation::Write::Failure)
+          op.execute(authorized_primary.context)
+          expect(authorized_collection.find(field: 'blah').count).to eq(1)
         end
       end
     end
@@ -140,37 +116,21 @@ describe Mongo::Operation::Write::BulkUpdate do
       let(:update) do
         described_class.new({
           updates: documents,
-          db_name: TEST_DB,
-          coll_name: TEST_COLL,
-          write_concern: Mongo::WriteConcern::Mode.get(:w => 1)
+          db_name: db_name,
+          coll_name: coll_name,
+          write_concern: write_concern
         })
       end
 
       context 'when the updates succeed' do
 
         let(:documents) do
-          [{ q: { field: 'test' }, u: { '$set' => { other: 'blah' }}, multi: true }]
-        end
-
-        let(:result) do
-          op.execute(authorized_primary.context)
+          [{ q: { other: 'test' }, u: { '$set' => { field: 'blah' }}, multi: true }]
         end
 
         it 'updates the documents' do
-          expect(result.written_count).to eq(2)
-        end
-      end
-
-      context 'when an update fails' do
-
-        let(:documents) do
-          [{ q: { name: 'test' }, u: { '$st' => { field: 'blah' }}, multi: true}]
-        end
-
-        it 'raises an exception' do
-          expect {
-            op.execute(authorized_primary.context)
-          }.to raise_error(Mongo::Operation::Write::Failure)
+          op.execute(authorized_primary.context)
+          expect(authorized_collection.find(field: 'blah').count).to eq(2)
         end
       end
     end
@@ -184,23 +144,43 @@ describe Mongo::Operation::Write::BulkUpdate do
       end
 
       let(:spec) do
-        { :updates       => documents,
-          :db_name       => TEST_DB,
-          :coll_name     => TEST_COLL,
-          :write_concern => Mongo::WriteConcern::Mode.get(w: 1),
-          :ordered       => true
+        { updates: documents,
+          db_name: db_name,
+          coll_name: coll_name,
+          write_concern: write_concern,
+          ordered: true
         }
       end
 
       let(:failing_update) do
         described_class.new(spec)
       end
-  
-      it 'aborts after first error' do
-        expect {
-          failing_update.execute(authorized_primary.context)
-        }.to raise_error(Mongo::Operation::Write::Failure)
-        expect(authorized_collection.find(other: 'blah').count).to eq(0)
+
+      context 'when the update fails' do
+
+        context 'when write concern is acknowledged' do
+
+          let(:write_concern) do
+            Mongo::WriteConcern.get(w: 1)
+          end
+
+          it 'aborts after first error' do
+            failing_update.execute(authorized_primary.context)
+            expect(authorized_collection.find(other: 'blah').count).to eq(0)
+          end
+        end
+
+        context 'when write concern is unacknowledged' do
+
+          let(:write_concern) do
+            Mongo::WriteConcern.get(w: 0)
+          end
+
+          it 'aborts after first error' do
+            failing_update.execute(authorized_primary.context)
+            expect(authorized_collection.find(other: 'blah').count).to eq(0)
+          end
+        end
       end
     end
 
@@ -208,16 +188,16 @@ describe Mongo::Operation::Write::BulkUpdate do
 
       let(:documents) do
         [ { q: { name: 'test' }, u: { '$st' => { field: 'blah' }}, multi: true},
-          { q: { field: 'test' }, u: { '$set' => { other: 'blah' }}, multi: true }
+          { q: { field: 'test' }, u: { '$set' => { other: 'blah' }}, multi: false }
         ]
       end
 
       let(:spec) do
-        { :updates       => documents,
-          :db_name       => TEST_DB,
-          :coll_name     => TEST_COLL,
-          :write_concern => Mongo::WriteConcern::Mode.get(w: 1),
-          :ordered       => false
+        { updates: documents,
+          db_name: db_name,
+          coll_name: coll_name,
+          write_concern: write_concern,
+          ordered: false
         }
       end
 
@@ -225,17 +205,32 @@ describe Mongo::Operation::Write::BulkUpdate do
         described_class.new(spec)
       end
 
-      it 'it continues executing operations after errors' do
-        expect {
-          failing_update.execute(authorized_primary.context)
-        }.to raise_error(Mongo::Operation::Write::Failure)
-        expect(authorized_collection.find(other: 'blah').count).to eq(2)
+      context 'when the update fails' do
+
+        context 'when write concern is acknowledged' do
+
+          let(:write_concern) do
+            Mongo::WriteConcern.get(w: 1)
+          end
+
+          it 'does not abort after first error' do
+            failing_update.execute(authorized_primary.context)
+            expect(authorized_collection.find(other: 'blah').count).to eq(1)
+          end
+        end
+
+        context 'when write concern is unacknowledged' do
+
+          let(:write_concern) do
+            Mongo::WriteConcern.get(w: 0)
+          end
+
+          it 'does not abort after first error' do
+            failing_update.execute(authorized_primary.context)
+            expect(authorized_collection.find(other: 'blah').count).to eq(1)
+          end
+        end
       end
-    end
-
-    context 'when the server is a secondary' do
-
-      pending 'it raises an exception'
     end
   end
 end

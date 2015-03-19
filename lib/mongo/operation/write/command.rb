@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,6 +17,6 @@ require 'mongo/operation/write/command/delete'
 require 'mongo/operation/write/command/insert'
 require 'mongo/operation/write/command/update'
 require 'mongo/operation/write/command/drop_index'
-require 'mongo/operation/write/command/ensure_index'
+require 'mongo/operation/write/command/create_index'
 require 'mongo/operation/write/command/create_user'
 require 'mongo/operation/write/command/remove_user'

@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ module Mongo
         # @return [ Database ] database The view's database.
         attr_reader :database
 
-        def_delegators :database, :cluster, :server_preference
+        def_delegators :database, :cluster, :read_preference
         def_delegators :cluster, :next_primary
 
         # Create a new user in the database.

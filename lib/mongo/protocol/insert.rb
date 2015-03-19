@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -54,6 +54,24 @@ module Mongo
         @flags = options[:flags] || []
       end
 
+      # The log message for a insert operation.
+      #
+      # @example Get the log message.
+      #   insert.log_message
+      #
+      # @return [ String ] The log message
+      #
+      # @since 2.0.0
+      def log_message
+        fields = []
+        fields << ["%s |", "INSERT"]
+        fields << ["namespace=%s", namespace]
+        fields << ["documents=%s", documents.inspect]
+        fields << ["flags=%s", flags.inspect]
+        f, v = fields.transpose
+        f.join(" ") % v
+      end
+
       private
 
       # The operation code required to specify an Insert message.
@@ -75,7 +93,7 @@ module Mongo
 
       # @!attribute
       # @return [Array<Hash>] The documents to insert.
-      field :documents, Document, :multi => true
+      field :documents, Document, true
     end
   end
 end

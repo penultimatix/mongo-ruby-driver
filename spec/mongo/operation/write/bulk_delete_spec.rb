@@ -16,12 +16,6 @@ describe Mongo::Operation::Write::BulkDelete do
     }
   end
 
-  let(:delete_write_cmd) do
-    double('delete_write_cmd').tap do |d|
-      allow(d).to receive(:execute) { [] }
-    end
-  end
-
   let(:op) { described_class.new(spec) }
 
   describe '#initialize' do
@@ -89,17 +83,17 @@ describe Mongo::Operation::Write::BulkDelete do
     end
 
     after do
-      authorized_collection.find.remove_many
+      authorized_collection.find.delete_many
     end
 
     context 'when deleting a single document' do
 
-      let(:delete) do
+      let(:op) do
         described_class.new({
           deletes: documents,
           db_name: TEST_DB,
           coll_name: TEST_COLL,
-          write_concern: Mongo::WriteConcern::Mode.get(w: 1)
+          write_concern: Mongo::WriteConcern.get(w: 1)
         })
       end
 
@@ -109,67 +103,33 @@ describe Mongo::Operation::Write::BulkDelete do
           [{ q: { field: 'test' }, limit: 1 }]
         end
 
-        let(:result) do
-          delete.execute(authorized_primary.context)
-        end
-
-        it 'deletes the documents from the database' do
-          expect(result.n).to eq(1)
-        end
-      end
-
-      context 'when the delete fails' do
-
-        let(:documents) do
-          [{ que: { field: 'test' }}]
-        end
-
-        it 'raises an exception' do
-          expect {
-            delete.execute(authorized_primary.context)
-          }.to raise_error(Mongo::Operation::Write::Failure)
+        it 'deletes the document from the database' do
+          op.execute(authorized_primary.context)
+          expect(authorized_collection.find.count).to eq(1)
         end
       end
     end
 
     context 'when deleting multiple documents' do
 
-      let(:delete) do
+      let(:op) do
         described_class.new({
           deletes: documents,
           db_name: TEST_DB,
           coll_name: TEST_COLL,
-          write_concern: Mongo::WriteConcern::Mode.get(w: 1)
+          write_concern: Mongo::WriteConcern.get(w: 1)
         })
       end
 
       context 'when the deletes succeed' do
 
         let(:documents) do
-          [{ q: { field: 'test' }, limit: -1 }]
-        end
-
-        let(:result) do
-          delete.execute(authorized_primary.context)
+          [{ q: { field: 'test' }, limit: 0 }]
         end
 
         it 'deletes the documents from the database' do
-          expect(result.n).to eq(2)
-        end
-      end
-
-      context 'when a delete fails' do
-
-        let(:documents) do
-          [{ q: { field: 'tester' }, limit: -1 }]
-        end
-
-        let(:result) do
-          delete.execute(authorized_primary.context)
-        end
-
-        it 'does not delete any documents' do
-          expect(result.n).to eq(0)
+          op.execute(authorized_primary.context)
+          expect(authorized_collection.find.count).to eq(0)
         end
       end
     end
@@ -177,61 +137,99 @@ describe Mongo::Operation::Write::BulkDelete do
     context 'when the deletes are ordered' do
 
       let(:documents) do
-        [ { que: { field: 'test' }},
+        [ failing_delete_doc,
           { q: { field: 'test' }, limit: 1 }
         ]
       end
-
+  
       let(:spec) do
         { :deletes       => documents,
           :db_name       => TEST_DB,
           :coll_name     => TEST_COLL,
-          :write_concern => Mongo::WriteConcern::Mode.get(w: 1),
+          :write_concern => write_concern,
           :ordered       => true
         }
       end
-
+  
       let(:failing_delete) do
         described_class.new(spec)
       end
-  
-      it 'aborts after first error' do
-        expect {
-          failing_delete.execute(authorized_primary.context)
-        }.to raise_error(Mongo::Operation::Write::Failure)
-        expect(authorized_collection.find.count).to eq(2)
+
+      context 'when the delete fails' do
+
+        context 'when write concern is acknowledged' do
+
+          let(:write_concern) do
+            Mongo::WriteConcern.get(w: 1)
+          end
+        
+          it 'aborts after first error' do
+            failing_delete.execute(authorized_primary.context)
+            expect(authorized_collection.find.count).to eq(2)
+          end
+        end
+
+        context 'when write concern is unacknowledged' do
+          
+          let(:write_concern) do
+            Mongo::WriteConcern.get(w: 0)
+          end
+      
+          it 'aborts after first error' do
+            failing_delete.execute(authorized_primary.context)
+            expect(authorized_collection.find.count).to eq(2)
+          end
+        end
       end
     end
 
     context 'when the deletes are unordered' do
 
       let(:documents) do
-        [
-          { q: { field: 'test' } },
+        [ failing_delete_doc,
           { q: { field: 'test' }, limit: 1 }
         ]
       end
-
+  
       let(:spec) do
         { :deletes       => documents,
           :db_name       => TEST_DB,
           :coll_name     => TEST_COLL,
-          :write_concern => Mongo::WriteConcern::Mode.get(w: 1),
+          :write_concern => write_concern,
           :ordered       => false
         }
       end
-
+  
       let(:failing_delete) do
         described_class.new(spec)
       end
-  
-      # @todo: find a way to make a delete functionally fail
-      pending 'it continues executing operations after errors'
-    end
 
-    context 'when the server is a secondary' do
+      context 'when the delete fails' do
 
-      pending 'it raises an exception'
+        context 'when write concern is acknowledged' do
+
+          let(:write_concern) do
+            Mongo::WriteConcern.get(w: 1)
+          end
+        
+          it 'does not abort after first error' do
+            failing_delete.execute(authorized_primary.context)
+            expect(authorized_collection.find.count).to eq(1)
+          end
+        end
+
+        context 'when write concern is unacknowledged' do
+          
+          let(:write_concern) do
+            Mongo::WriteConcern.get(w: 0)
+          end
+      
+          it 'does not abort after first error' do
+            failing_delete.execute(authorized_primary.context)
+            expect(authorized_collection.find.count).to eq(1)
+          end
+        end
+      end
     end
   end
 end

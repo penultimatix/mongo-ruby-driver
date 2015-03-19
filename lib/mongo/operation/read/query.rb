@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -39,12 +39,13 @@ module Mongo
       class Query
         include Executable
         include Specifiable
+        include ReadPreferrable
 
         # Execute the operation.
         # The context gets a connection on which the operation
         # is sent in the block.
         #
-        # @params [ Mongo::Server::Context ] The context for this operation.
+        # @param [ Server::Context ] context The context for this operation.
         #
         # @return [ Result ] The operation response, if there is one.
         #
@@ -57,12 +58,12 @@ module Mongo
 
         def execute_message(context)
           context.with_connection do |connection|
-            Result.new(connection.dispatch([ message ]))
+            Result.new(connection.dispatch([ message(context) ]))
           end
         end
 
-        def message
-          Protocol::Query.new(db_name, coll_name, selector, options)
+        def query_coll
+          coll_name
         end
       end
     end

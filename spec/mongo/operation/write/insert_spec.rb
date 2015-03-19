@@ -10,7 +10,7 @@ describe Mongo::Operation::Write::Insert do
     { :documents     => documents,
       :db_name       => TEST_DB,
       :coll_name     => TEST_COLL,
-      :write_concern => Mongo::WriteConcern::Mode.get(:w => 1)
+      :write_concern => Mongo::WriteConcern.get(:w => 1)
     }
   end
 
@@ -72,7 +72,7 @@ describe Mongo::Operation::Write::Insert do
 
     context 'deep copy' do
 
-      it 'copies the list of updates' do
+      it 'copies the list of documents' do
         copy = insert.dup
         expect(copy.spec[:documents]).to_not be(insert.spec[:documents])
       end
@@ -82,12 +82,12 @@ describe Mongo::Operation::Write::Insert do
   describe '#execute' do
 
     before do
-      authorized_collection.indexes.ensure({ name: 1 }, { unique: true })
+      authorized_collection.indexes.create_one({ name: 1 }, { unique: true })
     end
 
     after do
-      authorized_collection.find.remove_many
-      authorized_collection.indexes.drop({ name: 1 })
+      authorized_collection.find.delete_many
+      authorized_collection.indexes.drop_one('name_1')
     end
 
     context 'when inserting a single document' do
@@ -117,7 +117,7 @@ describe Mongo::Operation::Write::Insert do
           { :documents     => documents,
             :db_name       => TEST_DB,
             :coll_name     => TEST_COLL,
-            :write_concern => Mongo::WriteConcern::Mode.get(:w => 1)
+            :write_concern => Mongo::WriteConcern.get(:w => 1)
           }
         end
 
@@ -129,7 +129,7 @@ describe Mongo::Operation::Write::Insert do
           expect {
             failing_insert.execute(authorized_primary.context)
             failing_insert.execute(authorized_primary.context)
-          }.to raise_error(Mongo::Operation::Write::Failure)
+          }.to raise_error(Mongo::Error::OperationFailure)
         end
       end
     end
@@ -165,7 +165,7 @@ describe Mongo::Operation::Write::Insert do
           { :documents     => documents,
             :db_name       => TEST_DB,
             :coll_name     => TEST_COLL,
-            :write_concern => Mongo::WriteConcern::Mode.get(:w => 1)
+            :write_concern => Mongo::WriteConcern.get(:w => 1)
           }
         end
 
@@ -177,7 +177,7 @@ describe Mongo::Operation::Write::Insert do
           expect {
             failing_insert.execute(authorized_primary.context)
             failing_insert.execute(authorized_primary.context)
-          }.to raise_error(Mongo::Operation::Write::Failure)
+          }.to raise_error(Mongo::Error::OperationFailure)
         end
       end
 
@@ -191,7 +191,7 @@ describe Mongo::Operation::Write::Insert do
           { :documents     => documents,
             :db_name       => TEST_DB,
             :coll_name     => TEST_COLL,
-            :write_concern => Mongo::WriteConcern::Mode.get(:w => 1)
+            :write_concern => Mongo::WriteConcern.get(:w => 1)
           }
         end
 
@@ -203,14 +203,29 @@ describe Mongo::Operation::Write::Insert do
           expect {
             failing_insert.execute(authorized_primary.context)
             failing_insert.execute(authorized_primary.context)
-          }.to raise_error(Mongo::Operation::Write::Failure)
+          }.to raise_error(Mongo::Error::OperationFailure)
         end
       end
-    end
 
-    context 'when the server is a secondary' do
+      context 'when a document exceeds max bson size' do
 
-      pending 'it raises an exception'
+        let(:documents) do
+          [{ :x => 'y'* 17000000 }]
+        end
+
+        it 'raises an error' do
+          expect {
+            insert.execute(authorized_primary.context)
+          }.to raise_error(Mongo::Error::MaxBSONSize)
+        end
+
+        it 'does not insert the document' do
+          expect {
+            insert.execute(authorized_primary.context)
+          }.to raise_error(Mongo::Error::MaxBSONSize)
+          expect(authorized_collection.find.count).to eq(0)
+        end
+      end
     end
   end
 end

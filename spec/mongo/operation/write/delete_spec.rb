@@ -72,7 +72,7 @@ describe Mongo::Operation::Write::Delete do
     end
 
     after do
-      authorized_collection.find.remove_many
+      authorized_collection.find.delete_many
     end
 
     context 'when deleting a single document' do
@@ -82,7 +82,7 @@ describe Mongo::Operation::Write::Delete do
           delete: document,
           db_name: TEST_DB,
           coll_name: TEST_COLL,
-          write_concern: Mongo::WriteConcern::Mode.get(:w => 1)
+          write_concern: Mongo::WriteConcern.get(:w => 1)
         })
       end
 
@@ -110,7 +110,7 @@ describe Mongo::Operation::Write::Delete do
         it 'raises an exception' do
           expect {
             delete.execute(authorized_primary.context)
-          }.to raise_error(Mongo::Operation::Write::Failure)
+          }.to raise_error(Mongo::Error::OperationFailure)
         end
       end
     end
@@ -122,14 +122,14 @@ describe Mongo::Operation::Write::Delete do
           delete: document,
           db_name: TEST_DB,
           coll_name: TEST_COLL,
-          write_concern: Mongo::WriteConcern::Mode.get(:w => 1)
+          write_concern: Mongo::WriteConcern.get(:w => 1)
         })
       end
 
       context 'when the deletes succeed' do
 
         let(:document) do
-          { q: { field: 'test' }, limit: -1 }
+          { q: { field: 'test' }, limit: 0 }
         end
 
         let(:result) do
@@ -144,7 +144,7 @@ describe Mongo::Operation::Write::Delete do
       context 'when a delete fails' do
 
         let(:document) do
-          { q: { field: 'tester' }, limit: -1 }
+          failing_delete_doc
         end
 
         let(:result) do
@@ -152,14 +152,27 @@ describe Mongo::Operation::Write::Delete do
         end
 
         it 'does not delete any documents' do
-          expect(result.written_count).to eq(0)
+
+          expect {
+            op.execute(authorized_primary.context)
+          }.to raise_error(Mongo::Error::OperationFailure)
+
+          expect(authorized_collection.find.count).to eq(2)
         end
       end
-    end
 
-    context 'when the server is a secondary' do
+      context 'when a document exceeds max bson size' do
 
-      pending 'it raises an exception'
+        let(:document) do
+          { q: { field: 't'*17000000 }, limit: 0 }
+        end
+
+        it 'raises an error' do
+          expect {
+            op.execute(authorized_primary.context)
+          }.to raise_error(Mongo::Error::MaxBSONSize)
+        end
+      end
     end
   end
 end

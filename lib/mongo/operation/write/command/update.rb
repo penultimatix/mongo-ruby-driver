@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -46,10 +46,10 @@ module Mongo
           #
           # @return [ Hash ] The selector describing this update operation.
           def selector
-            { :update        => coll_name,
-              :updates       => updates,
-              :write_concern => write_concern.options,
-              :ordered       => ordered?
+            { update: coll_name,
+              updates: updates,
+              writeConcern: write_concern.options,
+              ordered: ordered?
             }
           end
         end

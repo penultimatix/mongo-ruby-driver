@@ -1,4 +1,4 @@
-# Copyright (C) 2009-2014 MongoDB, Inc.
+# Copyright (C) 2014-2015 MongoDB, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -32,11 +32,14 @@ module Mongo
     # @return [ Hash ] The collection options.
     attr_reader :options
 
-    # Get client, cluser and server preference from client.
-    def_delegators :@database, :client, :cluster, :server_preference, :write_concern
+    # Get client, cluster, read preference, and write concern from client.
+    def_delegators :database, :client, :cluster, :read_preference, :write_concern
 
     # Delegate to the cluster for the next primary.
     def_delegators :cluster, :next_primary
+
+    # Convenience delegators to find.
+    def_delegators :find, :parallel_scan
 
     # Check if a collection is equal to another object. Will check the name and
     # the database for equality.
@@ -99,13 +102,13 @@ module Mongo
     # @example Get all documents in a collection.
     #   collection.find
     #
-    # @param [ Hash ] selector The selector to use in the find.
+    # @param [ Hash ] filter The filter to use in the find.
     #
     # @return [ CollectionView ] The collection view.
     #
     # @since 2.0.0
-    def find(selector = nil)
-      View.new(self, selector || {})
+    def find(filter = nil)
+      View.new(self, filter || {})
     end
 
     # Get a view of all indexes for this collection. Can be iterated or has
@@ -114,11 +117,13 @@ module Mongo
     # @example Get the index view.
     #   collection.indexes
     #
+    # @param [ Hash ] options Options for getting a list of all indexes.
+    #
     # @return [ View::Index ] The index view.
     #
     # @since 2.0.0
-    def indexes
-      Index::View.new(self)
+    def indexes(options = {})
+      Index::View.new(self, options)
     end
 
     # Instantiate a new collection.
@@ -132,10 +137,22 @@ module Mongo
     #
     # @since 2.0.0
     def initialize(database, name, options = {})
-      raise InvalidName.new unless name
+      raise Error::InvalidCollectionName.new unless name
       @database = database
       @name = name.to_s.freeze
       @options = options.freeze
+    end
+
+    # Get a pretty printed string inspection for the collection.
+    #
+    # @example Inspect the collection.
+    #   collection.inspect
+    #
+    # @return [ String ] The collection inspection.
+    #
+    # @since 2.0.0
+    def inspect
+      "<Mongo::Collection:0x#{object_id} namespace=#{namespace}>"
     end
 
     # Insert a single document into the collection.
@@ -174,6 +191,21 @@ module Mongo
       ).execute(next_primary.context)
     end
 
+    # Execute a batch of bulk write operations.
+    #
+    # @example Execute a bulk write.
+    #   collection.bulk_write(operations, options)
+    #
+    # @param [ Array<Hash> ] operations The operations.
+    # @param [ Hash ] options The options.
+    #
+    # @return [ BSON::Document ] The result of the operation.
+    #
+    # @since 2.0.0
+    def bulk_write(operations, options)
+      BulkWrite.get(self, operations, options).execute
+    end
+
     # Get the fully qualified namespace of the collection.
     #
     # @example Get the fully qualified namespace.
@@ -184,28 +216,6 @@ module Mongo
     # @since 2.0.0
     def namespace
       "#{name}.#{database.name}"
-    end
-
-    # Exception that is raised when trying to create a collection with no name.
-    #
-    # @since 2.0.0
-    class InvalidName < DriverError
-
-      # The message is constant.
-      #
-      # @since 2.0.0
-      MESSAGE = 'nil is an invalid collection name. ' +
-        'Please provide a string or symbol.'
-
-      # Instantiate the new exception.
-      #
-      # @example Instantiate the exception.
-      #   Mongo::Collection::InvalidName.new
-      #
-      # @since 2.0.0
-      def initialize
-        super(MESSAGE)
-      end
     end
   end
 end
